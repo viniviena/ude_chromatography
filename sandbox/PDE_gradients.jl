@@ -62,18 +62,69 @@ t_exp = exp_data[1:end, end] #time records
 q_exp_data = readdlm("../q_exp_new2.csv", ',', Float64) # solid phase concentration measurements
 
 # -----Initializing Neural networks---------
+import Random
 Random.seed!(10)
-ann_node1 = Chain(Dense(2, 7, tanh), Dense(7, 1)) #ANNₑ,₁
-ann_node2 = Chain(Dense(2, 7, tanh), Dense(7, 1)) #ANNₑ,₂
-kldf_nn1 = Chain(Dense(2, 7, tanh), Dense(7, 1, sigmoid), (x, a) -> x * 3) #ANNₘ,₁
-kldf_nn2 = Chain(Dense(2, 7, tanh), Dense(7, 1, sigmoid), (x, a) -> x * 3) #ANNₘ,₂
+ann_node1 = FastChain(FastDense(2, 7, tanh), FastDense(7, 1)); #ANNₑ,₁
+ann_node2 = FastChain(FastDense(2, 7, tanh), FastDense(7, 1)); #ANNₑ,₂
+kldf_nn1 = FastChain(FastDense(2, 7, tanh), FastDense(7, 1, sigmoid), (x, a) -> x * 3) #ANNₘ,₁
+kldf_nn2 = FastChain(FastDense(2, 7, tanh), FastDense(7, 1, sigmoid), (x, a) -> x * 3) #ANNₘ,₂
 
 
 #getting params
-net_params1 = Float64.(initial_params(ann_node1))
-net_params2 = Float64.(initial_params(ann_node2))
-net_params3 = Float64.(initial_params(kldf_nn1))
-net_params4 = Float64.(initial_params(kldf_nn2))
+net_params1 = Float64.(initial_params(ann_node1));
+net_params2 = Float64.(initial_params(ann_node2));
+net_params3 = Float64.(initial_params(kldf_nn1));
+net_params4 = Float64.(initial_params(kldf_nn2));
+
+#Here I had to define my own activation functions because I've got error trying to use Flux with modelingtoolkit together.
+function my_sigmoid(x)
+    1 / (1 + exp(-x)) * 3
+end
+
+function my_gelu(x)
+    0.5 * x * (1 + tanh.(sqrt(2 / pi) * (x .+ 0.044715 * x .^ 3)))
+end
+
+#Rebuilding the NNs because I had trouble making modelingtoolkit work with Flux
+function _ann1(u, p)
+    w1 = reshape(p[1:2*7], 7, 2)
+    b1 = p[2*7+1:3*7]
+    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
+    b2 = p[4*7+1:end]
+
+    (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
+
+end
+
+function _ann2(u, p)
+    w1 = reshape(p[1:2*7], 7, 2)
+    b1 = p[2*7+1:3*7]
+    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
+    b2 = p[4*7+1:end]
+
+    (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
+
+end
+
+function _ann3(u, p)
+    w1 = reshape(p[1:2*7], 7, 2)
+    b1 = p[2*7+1:3*7]
+    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
+    b2 = p[4*7+1:end]
+
+    my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
+
+end
+
+function _ann4(u, p)
+    w1 = reshape(p[1:2*7], 7, 2)
+    b1 = p[2*7+1:3*7]
+    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
+    b2 = p[4*7+1:end]
+
+    my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
+
+end
 
 
 # ----- Building the actual PDE model--------
@@ -225,7 +276,7 @@ prob_node = ODEProblem(f_node, y0, tspan, p)
 
 #testing solution time
 
-@time solution = Array(solve(prob_optim, Rodas5(autodiff=false), callback=cb2,
+@time solution = Array(solve(prob_node, Rodas5(autodiff=false), callback=cb2,
     abstol=1e-5, reltol=1e-5,
     saveat=t_exp[1:204])) #0.27 seconds after compiling
 
@@ -241,19 +292,13 @@ function predict(θ)
     y0 = y_initial(θ, (u0, c0)) # As mentioned, I have to update initial conditions at every θ update
 
     # --------------------------Sensealg---------------------------------------------
-    #sensealg = DiffEqSensitivity.InterpolatingAdjoint(autojacvec = DiffEqSensitivity.ReverseDiffVJP(true), checkpointing = true)
-    #sensealg = EnzymeVJP()
-    #sensealg = InterpolatingAdjoint(autojacvec = ZygoteVJP(), checkpointing = true)
-    sensealg = DiffEqSensitivity.QuadratureAdjoint(autojacvec=DiffEqSensitivity.ZygoteVJP())
-    #sensealg = BacksolveAdjoint(autojacvec = ZygoteVJP())
-    #sensealg = ForwardDiffSensitivity()
-    #sensealg = ForwardSensitivity()
+    sensealg = InterpolatingAdjoint(autojacvec=ReverseDiffVJP())
     #----------------------------Problem solution-------------------------------------
     abstol = 1e-5
     reltol = 1e-5
-    prob_ = remake(prob_optim, u0=y0, tspan=tspan, p=θ)
+    prob_ = remake(prob_node, u0=y0, tspan=tspan, p=θ)
     s_new = Array(solve(prob_, Rodas5(autodiff=false), callback=cb2, sensealg=sensealg,
-        saveat=t_exp[1:end], abstol=abstol, reltol=reltol))
+        saveat=t_exp[1:204], abstol=abstol, reltol=reltol))
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
@@ -281,10 +326,8 @@ println("Testing loss", losvt)
 
 loss(θ) = sum(Flux.Losses.mse.(data_train[1:4], predict(θ)[1:4]))
 
-#testing gradient calculation (takes a lot of time and almost 10gb of ram peak, Zygote do not work)
-#@time grad = Enzyme.autodiff(Enzyme.ReverseMode, loss, Active, Active([11.64; 0.95; net_params1; net_params2; net_params3; net_params4]))
-
 θ = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4]
-
 loss(θ)
 grad = Zygote.gradient(loss, θ)
+
+@show t_exp[1:204]
