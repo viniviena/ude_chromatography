@@ -191,10 +191,13 @@ end
 
 # building rhs function for DAE solver
 
-struct col_model_node{T1, T2, T3}
+struct col_model_node{T1, T2, T3, T4, T5, T6}
 n_variables::T1
 n_elements::T2
 p_order::T3
+L::T4
+h::T5
+u::T6
 end
 
 function (f::col_model_node)(yp, y, p, t)
@@ -239,7 +242,7 @@ function (f::col_model_node)(yp, y, p, t)
 
        #Liquid phase residual
 
-       @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / h / (L / u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (h^2) / (L / u)
+       @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / f.h / (f.L / f.u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (f.h^2) / (f.L / f.u)
 
 
        #Solid phase residual
@@ -248,9 +251,9 @@ function (f::col_model_node)(yp, y, p, t)
 
 
        #Boundary node equations
-       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i])
+       yp[cbl_idx] = dy_du[cbl_idx] / f.h .- Pe * (y[cbl_idx] .- p[i])
 
-       yp[cbu_idx] = dy_du[cbu_idx] / h
+       yp[cbu_idx] = dy_du[cbu_idx] / f.h
 
        j = j + f.p_order + 2 * f.n_elements - 2
    end
@@ -272,7 +275,7 @@ end
 cb2 = PresetTimeCallback(dosetimes, affect!, save_positions=(false, false))
 
 # Building ODE problem
-rhs! = col_model_node(n_variables, n_elements, p_order);
+rhs! = col_model_node(n_variables, n_elements, p_order, L, h, u);
 f_node = ODEFunction(rhs!, mass_matrix=MM)
 tspan = (0.0f0, 147.8266667f0)
 p = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params
