@@ -191,67 +191,72 @@ end
 
 # building rhs function for DAE solver
 
-function col_model_node!(yp, y, p, t)
-    #Aliasing parameters
-    Pe, eps = params_ode[7:8]
-
-    dy_du = [dot(y_dy[i, :], y) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
-    dy2_du = [dot(y_dy2[i, :], y) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
-
-    j = 0
-
-    #---------------------Mass Transfer and equilibrium -----------------
-
-    x1 = (y[2+0-1:p_order+2*n_elements-3+0+1] .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
-    x2 = (y[2+(p_order+2*n_elements-2)-1:p_order+2*n_elements-3+(p_order+2*n_elements-2)+1] .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
-    p1 = @view p[1+2:29+2]
-    p2 = @view p[30+2:60]
-    p3 = @view p[61:61+28]
-    p4 = @view p[61+28+1:end]
-    #q_star1 = _ann1([x1 x2]', p1)
-    #q_star2 = _ann2([x1 x2]', p2)
-    #K_transf_empirical1 = _ann3([x1 x2]', p3)
-    #K_transf_empirical2 = _ann4([x1 x2]', p4)
-    q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
-    K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
-
-
-
-    #-------------------------------mass balance -----------------
-
-    for i = 1:n_components
-        #Internal node equations
-        cl_idx = 2 + j
-        cu_idx = p_order + 2 * n_elements - 3 + j
-
-        ql_idx = 2 * (p_order + 2 * n_elements - 2) + 2 + j
-        qu_idx = p_order + 2 * n_elements - 3 + 2 * (p_order + 2 * n_elements - 2) + j
-
-        ql_idx2 = 2 * (p_order + 2 * n_elements - 2) + 2 + j - 1
-        qu_idx2 = p_order + 2 * n_elements - 3 + 2 * (p_order + 2 * n_elements - 2) + j + 1
-
-        cbl_idx = j + 1
-        cbu_idx = j + p_order + 2 * n_elements - 2
-
-        #Liquid phase residual
-
-        @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / h / (L / u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (h^2) / (L / u)
-
-
-        #Solid phase residual
-
-        @. yp[ql_idx2:qu_idx2] = K_transf_empirical[i, 1:end] .* (q_star[i, :] .- y[ql_idx2:qu_idx2])
-
-
-        #Boundary node equations
-        yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i])
-
-        yp[cbu_idx] = dy_du[cbu_idx] / h
-
-        j = j + p_order + 2 * n_elements - 2
-    end
-    nothing
+struct col_model_node{T1, T2, T3}
+n_variables::T1
+n_elements::T2
+p_order::T3
 end
+
+function (f::col_model_node)(yp, y, p, t)
+   #Aliasing parameters
+   Pe, eps = params_ode[7:8]
+
+   dy_du = [dot(y_dy[i, :], y) for i in 1:Int(f.n_variables)] # ∂y/∂u where u is the local spatial coordinate
+   dy2_du = [dot(y_dy2[i, :], y) for i in 1:Int(f.n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
+
+   j = 0
+
+   #---------------------Mass Transfer and equilibrium -----------------
+
+   x1 = (y[2+0-1:f.p_order+2*f.n_elements-3+0+1] .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
+   x2 = (y[2+(f.p_order+2*f.n_elements-2)-1:f.p_order+2*f.n_elements-3+(f.p_order+2*f.n_elements-2)+1] .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
+   p1 = @view p[1+2:29+2]
+   p2 = @view p[30+2:60]
+   p3 = @view p[61:61+28]
+   p4 = @view p[61+28+1:end]
+   #q_star1 = _ann1([x1 x2]', p1)
+   #q_star2 = _ann2([x1 x2]', p2)
+   #K_transf_empirical1 = _ann3([x1 x2]', p3)
+   #K_transf_empirical2 = _ann4([x1 x2]', p4)
+   q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
+   K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
+
+   #-------------------------------mass balance -----------------
+
+   for i = 1:n_components
+       #Internal node equations
+       cl_idx = 2 + j
+       cu_idx = f.p_order + 2 * f.n_elements - 3 + j
+
+       ql_idx = 2 * (f.p_order + 2 * f.n_elements - 2) + 2 + j
+       qu_idx = f.p_order + 2 * f.n_elements - 3 + 2 * (f.p_order + 2 * f.n_elements - 2) + j
+
+       ql_idx2 = 2 * (f.p_order + 2 * f.n_elements - 2) + 2 + j - 1
+       qu_idx2 = f.p_order + 2 * f.n_elements - 3 + 2 * (f.p_order + 2 * f.n_elements - 2) + j + 1
+
+       cbl_idx = j + 1
+       cbu_idx = j + f.p_order + 2 * f.n_elements - 2
+
+       #Liquid phase residual
+
+       @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / h / (L / u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (h^2) / (L / u)
+
+
+       #Solid phase residual
+
+       @. yp[ql_idx2:qu_idx2] = K_transf_empirical[i, 1:end] .* (q_star[i, :] .- y[ql_idx2:qu_idx2])
+
+
+       #Boundary node equations
+       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i])
+
+       yp[cbu_idx] = dy_du[cbu_idx] / h
+
+       j = j + f.p_order + 2 * f.n_elements - 2
+   end
+   nothing
+end
+
 
 #Setting up callback
 
@@ -267,7 +272,8 @@ end
 cb2 = PresetTimeCallback(dosetimes, affect!, save_positions=(false, false))
 
 # Building ODE problem
-f_node = ODEFunction(col_model_node!, mass_matrix=MM)
+rhs! = col_model_node(n_variables, n_elements, p_order);
+f_node = ODEFunction(rhs!, mass_matrix=MM)
 tspan = (0.0f0, 147.8266667f0)
 p = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params
 y0 = y_initial(p, (u0, c0))
