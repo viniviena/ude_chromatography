@@ -36,7 +36,7 @@ h = (xₘₐₓ - xₘᵢₙ) / n_elements #finite elements' sizes
 H, A, B = make_OCFEM(n_elements, n_phases, n_components) #make matrices for OCFEM
 
 #Building mass matrix
-MM = make_MM(n_elements, n_phases, n_components) #make mass matrix
+MM = Array(make_MM(n_elements, n_phases, n_components)) #make mass matrix
 
 #-------- Defining PDE parameters------------
 
@@ -52,8 +52,8 @@ kappab = 0.003 * 3 / 245.5E-4 #min -1 (not being used)
 params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
 #Calculating the derivative matrices stencil
-y_dy = A * H^-1 # y = H*a and dy_dx = A*a = (A*H-1)*y
-y_dy2 = B * H^-1 # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
+y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
+y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 #--------Importing experimental data---------------
 vars = matread("../Global_Poh_ProPro.mat")
@@ -136,13 +136,17 @@ end
 #As shown above → qᵢ(t = 0, z) =  ANNₑ,ᵢ(c,θₑ,ᵢ)
 
 # cache u0 to put down
-y0_cache = dualcache(ones(n_variables), 12)
-c0 = dualcache([13.230000, 0.00000], 12)
+#y0_cache = dualcache(ones(n_variables), 12)
+#c0 = dualcache([13.230000, 0.00000], 12)
 
-function y_initial(p, (y0_cache, c0))
+y0_cache = ones(n_variables);
+c0 = [13.230000, 0.00000];
 
-    var0 = get_tmp(y0_cache, p)
-    c0 = get_tmp(c0, p)
+function y_initial(θ, y0_cache, c0)
+
+    #var0 = get_tmp(y0_cache, p)
+    #c0 = get_tmp(c0, p)
+    var0 = y0_cache[:]
     j = 0
 
     for i = 1:n_components
@@ -167,8 +171,8 @@ function y_initial(p, (y0_cache, c0))
 
     x1 = (var0[2+0-1:p_order+2*n_elements-3+0+1] .- 6.0) ./ (13.0 - 6.0)
     x2 = (var0[2+(p_order+2*n_elements-2)-1:p_order+2*n_elements-3+(p_order+2*n_elements-2)+1] .- 0.047) ./ (4.0 - 0.047)
-    p11 = @view p[1+2:29+2]
-    p22 = @view p[30+2:60]
+    p11 = @view θ[1+2:29+2]
+    p22 = @view θ[30+2:60]
     q_star1 = _ann1([x1 x2]', p11)
     q_star2 = _ann2([x1 x2]', p22)
     q_star = [q_star1; q_star2]
@@ -217,25 +221,25 @@ function (f::col_model_node)(yp, y, p, t)
    @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, Pe, eps = f 
    
 
-   @timeit tmr "dy_du" dy_du = [y'*(@view y_dy[i, :]) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
-   @timeit tmr "dy2_du" dy2_du = [y'*(@view y_dy2[i, :]) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
+   dy_du = [dot((@view y_dy[i, :]),y) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
+   dy2_du = [dot((@view y_dy2[i, :]),y) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
 
    j = 0
 
    #---------------------Mass Transfer and equilibrium -----------------
 
-   @timeit tmr "view x1" x1 = ((@view y[2+0-1:p_order+2*n_elements-3+0+1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
-   @timeit tmr "view x2" x2 = ((@view y[2+(p_order + 2*n_elements - 2)-1: p_order + 2*n_elements - 3 + (p_order+2*n_elements-2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
-   @timeit tmr "view p1" p1 = @view p[1+2:29+2]
+   x1 = ((@view y[2+0-1:p_order+2*n_elements-3+0+1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
+   x2 = ((@view y[2+(p_order + 2*n_elements - 2)-1: p_order + 2*n_elements - 3 + (p_order+2*n_elements-2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
+   p1 = @view p[1+2:29+2]
    p2 = @view p[30+2:60]
    p3 = @view p[61:61+28]
    p4 = @view p[61+28+1:end]
-   @timeit tmr "qstar forward" q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
-   @timeit tmr "K_trans_empirical forward" K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
+   q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
+   K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
 
    #-------------------------------mass balance -----------------
 
-   @timeit tmr "for loop" @inbounds for i = 1:n_components
+   for i = 1:n_components
        #Internal node equations
        cl_idx = 2 + j
        cu_idx = p_order + 2 * n_elements - 3 + j
@@ -251,12 +255,12 @@ function (f::col_model_node)(yp, y, p, t)
 
        #Liquid phase residual
 
-       @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / f.h / (f.L / f.u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (f.h^2) / (f.L / f.u)
+       yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / h / (L / u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (h^2) / (L / u)
 
 
        #Solid phase residual
 
-       @. yp[ql_idx2:qu_idx2] = K_transf_empirical[i, 1:end] .* (q_star[i, :] .- y[ql_idx2:qu_idx2])
+       yp[ql_idx2:qu_idx2] = K_transf_empirical[i, 1:end] .* (q_star[i, :] .- y[ql_idx2:qu_idx2])
 
 
        #Boundary node equations
@@ -264,7 +268,7 @@ function (f::col_model_node)(yp, y, p, t)
 
        yp[cbu_idx] = dy_du[cbu_idx] / h
 
-       j = j + f.p_order + 2 * f.n_elements - 2
+       j = j + p_order + 2 * n_elements - 2
    end
    nothing
 end
@@ -285,18 +289,30 @@ cb2 = PresetTimeCallback(dosetimes, affect!, save_positions=(false, false))
 
 # Building ODE problem
 rhs = col_model_node(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, params_ode[7], params_ode[8]);
+
 f_node = ODEFunction(rhs, mass_matrix = MM)
-tspan = (0.0f0, 147.8266667f0)
-p = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params
-y0 = y_initial(p, (y0_cache, c0))
-prob_node = ODEProblem(f_node, y0, tspan, p)
 
+tspan = (0.0, 147.8266667)
 
-#testing solution time
+parameters = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params)
 
-@time solution = Array(solve(prob_node, Rodas5(autodiff=false), callback=cb2,
-    abstol=1e-5, reltol=1e-5,
-    saveat=t_exp[1:204])) #0.27 seconds after compiling
+y0 = y_initial(parameters, y0_cache, c0)
+
+prob_node = ODEProblem(f_node, y0, tspan, parameters)
+
+@time solution = solve(prob_node, FBDF(autodiff=false), callback=cb2, saveat = t_exp[1:204]); #0.27 seconds after compiling
+
+#Jacobian sparsity
+
+using Symbolics
+
+du0 = copy(y0)
+jac_sparsity = Symbolics.jacobian_sparsity((du,u)-> rhs(du,u, [11.64; 0.95; net_params1; net_params2; net_params3; net_params4], 0.0), du0, y0)
+f_node_jac = ODEFunction(rhs, mass_matrix = MM, jac_prototype = float.(jac_sparsity));
+prob_node_jac = ODEProblem(f_node_jac, y0, tspan, p)
+
+BLAS.set_num_threads(1)
+
 
 #--------- Training Neural Network ----------
 
@@ -307,16 +323,17 @@ qb_index = Int(n_variables / 4 * 3 + 1):n_variables #indices for taking q₂
 
 function predict(θ)
     #------------------------Initial condition---------------------------------------
-    y0 = y_initial(θ, (y0_cache, c0)) # As mentioned, I have to update initial conditions at every θ update
-
+    #y0 = y_initial(θ, (y0_cache, c0)) # As mentioned, I have to update initial conditions at every θ update
+    y0 = y_initial(θ, y0_cache, c0);
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec=ReverseDiffVJP())
+    sensealg = InterpolatingAdjoint(autojacvec = ZygoteVJP())
     #----------------------------Problem solution-------------------------------------
     abstol = 1e-5
     reltol = 1e-5
+    tspan = (0.0, 147.8266667)
     prob_ = remake(prob_node, u0=y0, tspan=tspan, p=θ)
-    s_new = Array(solve(prob_, Rodas5(autodiff=false), callback=cb2, sensealg=sensealg,
-        saveat=t_exp[1:204], abstol=abstol, reltol=reltol))
+    s_new = Array(solve(prob_, FBDF(autodiff=false), callback=cb2,
+        saveat=t_exp[1:204], sensealg = sensealg))
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
@@ -343,9 +360,21 @@ println("Testing loss", losvt)
 #Here I set up another loss function to use in a home made Adam, because I was not able to use SciML or flux to train it.
 
 loss(θ) = sum(Flux.Losses.mse.(data_train[1:4], predict(θ)[1:4]))
+function loss_1(θ)
+prediction =  predict(θ)
+loss1 = sum(abs2, reshape(prediction[1] -  data_train[1], :, 1))
+loss2 = sum(abs2, reshape(prediction[2] -  data_train[2], :, 1))
+loss3 = sum(abs2, reshape(prediction[3] -  data_train[3], :, 1))
+loss4 = sum(abs2, reshape(prediction[4] -  data_train[4], :, 1))
+loss1 + loss2 + loss3 + loss4 
+
+end
+
+
 
 θ = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4]
-loss(θ)
+loss_1(θ)
+@time loss(θ)
 grad = Zygote.gradient(loss, θ)
 
 @show t_exp[1:204]
