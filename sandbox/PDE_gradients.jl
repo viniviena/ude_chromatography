@@ -6,7 +6,8 @@ Pkg.instantiate()
 #Importing ODE, plot and MAT libraries
 using OrdinaryDiffEq
 using DiffEqFlux
-using DiffEqCallbacks
+#using DiffEqCallbacks
+using DifferentialEquations
 using Flux
 using Plots
 using MAT
@@ -135,12 +136,12 @@ end
 #As shown above → qᵢ(t = 0, z) =  ANNₑ,ᵢ(c,θₑ,ᵢ)
 
 # cache u0 to put down
-u0 = dualcache(ones(n_variables), 12)
+y0_cache = dualcache(ones(n_variables), 12)
 c0 = dualcache([13.230000, 0.00000], 12)
 
-function y_initial(p, (u0, c0))
+function y_initial(p, (y0_cache, c0))
 
-    var0 = get_tmp(u0, p)
+    var0 = get_tmp(y0_cache, p)
     c0 = get_tmp(c0, p)
     j = 0
 
@@ -191,54 +192,62 @@ end
 
 # building rhs function for DAE solver
 
-struct col_model_node{T1, T2, T3, T4, T5, T6}
+struct col_model_node{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10}
 n_variables::T1
 n_elements::T2
 p_order::T3
 L::T4
 h::T5
 u::T6
+y_dy::T7
+y_dy2::T8
+Pe::T9
+eps::T10
 end
+
+using TimerOutputs
+using UnPack
+
+
+tmr = TimerOutput();
 
 function (f::col_model_node)(yp, y, p, t)
    #Aliasing parameters
-   Pe, eps = params_ode[7:8]
 
-   dy_du = [dot(y_dy[i, :], y) for i in 1:Int(f.n_variables)] # ∂y/∂u where u is the local spatial coordinate
-   dy2_du = [dot(y_dy2[i, :], y) for i in 1:Int(f.n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
+   @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, Pe, eps = f 
+   
+
+   @timeit tmr "dy_du" dy_du = [y'*(@view y_dy[i, :]) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
+   @timeit tmr "dy2_du" dy2_du = [y'*(@view y_dy2[i, :]) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
 
    j = 0
 
    #---------------------Mass Transfer and equilibrium -----------------
 
-   x1 = (y[2+0-1:f.p_order+2*f.n_elements-3+0+1] .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
-   x2 = (y[2+(f.p_order+2*f.n_elements-2)-1:f.p_order+2*f.n_elements-3+(f.p_order+2*f.n_elements-2)+1] .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
-   p1 = @view p[1+2:29+2]
+   @timeit tmr "view x1" x1 = ((@view y[2+0-1:p_order+2*n_elements-3+0+1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
+   @timeit tmr "view x2" x2 = ((@view y[2+(p_order + 2*n_elements - 2)-1: p_order + 2*n_elements - 3 + (p_order+2*n_elements-2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
+   @timeit tmr "view p1" p1 = @view p[1+2:29+2]
    p2 = @view p[30+2:60]
    p3 = @view p[61:61+28]
    p4 = @view p[61+28+1:end]
-   #q_star1 = _ann1([x1 x2]', p1)
-   #q_star2 = _ann2([x1 x2]', p2)
-   #K_transf_empirical1 = _ann3([x1 x2]', p3)
-   #K_transf_empirical2 = _ann4([x1 x2]', p4)
-   q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
-   K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
+   @timeit tmr "qstar forward" q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
+   @timeit tmr "K_trans_empirical forward" K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
 
    #-------------------------------mass balance -----------------
 
-   for i = 1:n_components
+   @timeit tmr "for loop" @inbounds for i = 1:n_components
        #Internal node equations
        cl_idx = 2 + j
-       cu_idx = f.p_order + 2 * f.n_elements - 3 + j
+       cu_idx = p_order + 2 * n_elements - 3 + j
 
-       ql_idx = 2 * (f.p_order + 2 * f.n_elements - 2) + 2 + j
-       qu_idx = f.p_order + 2 * f.n_elements - 3 + 2 * (f.p_order + 2 * f.n_elements - 2) + j
+       ql_idx = 2 * (p_order + 2 * n_elements - 2) + 2 + j
+       qu_idx = p_order + 2 * n_elements - 3 + 2 * (p_order + 2 * n_elements - 2) + j
 
-       ql_idx2 = 2 * (f.p_order + 2 * f.n_elements - 2) + 2 + j - 1
-       qu_idx2 = f.p_order + 2 * f.n_elements - 3 + 2 * (f.p_order + 2 * f.n_elements - 2) + j + 1
+       ql_idx2 = 2 * (p_order + 2 * n_elements - 2) + 2 + j - 1
+       qu_idx2 = p_order + 2 * n_elements - 3 + 2 * (p_order + 2 * n_elements - 2) + j + 1
 
        cbl_idx = j + 1
-       cbu_idx = j + f.p_order + 2 * f.n_elements - 2
+       cbu_idx = j + p_order + 2 * n_elements - 2
 
        #Liquid phase residual
 
@@ -251,9 +260,9 @@ function (f::col_model_node)(yp, y, p, t)
 
 
        #Boundary node equations
-       yp[cbl_idx] = dy_du[cbl_idx] / f.h .- Pe * (y[cbl_idx] .- p[i])
+       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i])
 
-       yp[cbu_idx] = dy_du[cbu_idx] / f.h
+       yp[cbu_idx] = dy_du[cbu_idx] / h
 
        j = j + f.p_order + 2 * f.n_elements - 2
    end
@@ -275,11 +284,11 @@ end
 cb2 = PresetTimeCallback(dosetimes, affect!, save_positions=(false, false))
 
 # Building ODE problem
-rhs! = col_model_node(n_variables, n_elements, p_order, L, h, u);
-f_node = ODEFunction(rhs!, mass_matrix=MM)
+rhs = col_model_node(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, params_ode[7], params_ode[8]);
+f_node = ODEFunction(rhs, mass_matrix = MM)
 tspan = (0.0f0, 147.8266667f0)
 p = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params
-y0 = y_initial(p, (u0, c0))
+y0 = y_initial(p, (y0_cache, c0))
 prob_node = ODEProblem(f_node, y0, tspan, p)
 
 
@@ -298,7 +307,7 @@ qb_index = Int(n_variables / 4 * 3 + 1):n_variables #indices for taking q₂
 
 function predict(θ)
     #------------------------Initial condition---------------------------------------
-    y0 = y_initial(θ, (u0, c0)) # As mentioned, I have to update initial conditions at every θ update
+    y0 = y_initial(θ, (y0_cache, c0)) # As mentioned, I have to update initial conditions at every θ update
 
     # --------------------------Sensealg---------------------------------------------
     sensealg = InterpolatingAdjoint(autojacvec=ReverseDiffVJP())
