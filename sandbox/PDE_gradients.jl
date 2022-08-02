@@ -316,7 +316,7 @@ train_params = [y0_train; parameters] #Concatenating trainable params
 prob_node = ODEProblem(f_node, [y0_non_train; y0_train] , tspan, train_params)
 
 #testing ode solution time
-@btime solution = solve(prob_node, FBDF(autodiff = false),
+@time solution = solve(prob_node, FBDF(autodiff = false),
  callback = cb2, saveat = t_exp[1:204]); #0.27 seconds after compiling
 
 #Jacobian sparsity
@@ -332,7 +332,7 @@ function predict(θ)
     y0_train = @view θ[1:Int(n_variables / 4 * 2)] 
 
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec = ZygoteVJP())
+    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
     #----------------------------Problem solution-------------------------------------
     abstol = 1e-5
     reltol = 1e-5
@@ -360,7 +360,7 @@ function loss_dae(θ)
 end
 
 #testing loss
-@time losvt, pred_123 = loss_dae(train_params)
+@time losvt, pred_123 = loss_dae(train_params);
 println("Testing loss ", losvt)
 
 

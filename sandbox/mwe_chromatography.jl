@@ -31,7 +31,7 @@ function trueODEfunc(du, u, p, t)
 #parameters
 Cf = p
 
-du[1] =  Qf/(ε*V)*(Cf - u[1]) - (1-ε)/ε*du[2]
+du[1] =  Qf/(ε*V)*(Cf - u[1]) - (1-ε)/ε*k_transf*(Qₘ*K*u[1]/(1 + K*u[1]) - u[2])
 du[2] = k_transf*(Qₘ*K*u[1]/(1 + K*u[1]) - u[2])
 
 end
@@ -59,7 +59,7 @@ end
  
 cb2 = PresetTimeCallback(dosetimes, affect!, save_positions = (false, false));
 
-ode_data = Array(solve(prob_trueode, AutoVern9(KenCarp4(autodiff = false)),
+ode_data = Array(solve(prob_trueode, Rodas4(autodiff = true),
                   saveat = tsteps, callback = cb2))[1, 1:end]
 
 ode_data2 = [Qₘ*1.0*K/(1 + 1.0*K); Qₘ*2.0*K/(1 + 2.0*K)]
@@ -87,7 +87,7 @@ end
 function dudt(du,u,p,t)
     Cf = p[1]
     q_star = _ann1(u[1], p[3:end])[1]
-    du[1] =  Qf/(ε*V)*(Cf - u[1]) - (1-ε)/ε*du[2]
+    du[1] =  Qf/(ε*V)*(Cf - u[1]) - (1-ε)/ε*k_transf*(q_star - u[2])
     du[2] = k_transf*(q_star - u[2])
 end
 
@@ -117,7 +117,7 @@ sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
 
 prob_ = remake(prob_ude, u0 = u0, tspan = tspan, p = θ)
 
-sol_node = Array(solve(prob_ude, AutoVern9(KenCarp4(autodiff = false)), sensealg = sensealg, 
+sol_node = Array(solve(prob_, AutoVern9(KenCarp4(autodiff = false)), sensealg = sensealg, 
                   saveat = tsteps, callback = cb_node))
 [sol_node[1, 1:end], sol_node[2, [101,end]]]
 
@@ -127,7 +127,7 @@ end
 function loss(θ)
 pred = predict(θ)
 #data = data_train
-sum(Flux.Losses.mse.(train_data[1:2], pred[1:2])) 
+sum(Flux.Losses.mse.(train_data[1:2], pred[1:2]))
 end
 
 grad = Zygote.gradient(loss, θ)
