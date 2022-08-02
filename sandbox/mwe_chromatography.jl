@@ -19,7 +19,7 @@ d = 0.26  # Column diameter (dm3)
 L = 1.15 # Column length (dm)
 a = pi*d^2/4 #Column cross section area (dm2)
 ε = 0.42 # void fraction
-u = Qf/(a*epsilon) #dm/min (drif velocity)
+u = Qf/(a*ε) #dm/min (drif velocity)
 V = a*L # tank volume (dm3)
 k_transf = 0.001*3/245.5E-4
 
