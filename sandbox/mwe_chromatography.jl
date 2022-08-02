@@ -113,7 +113,7 @@ sol_node = Array(solve(prob_ude, AutoVern9(KenCarp4(autodiff = false)),
 function predict(θ)
 u0 = [c0, θ[2]]
 
-sensealg = sensealg = InterpolatingAdjoint(autojacvec = ZygoteVJP())
+sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
 
 prob_ = remake(prob_ude, u0 = u0, tspan = tspan, p = θ)
 
