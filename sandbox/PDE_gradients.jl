@@ -23,7 +23,7 @@ include("../utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 20 # Number of finite elements
+n_elements = 25 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 2;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -79,7 +79,7 @@ net_params4 = Float64.(initial_params(kldf_nn2));
 
 #Here I had to define my own activation functions because I've got error trying to use Flux with modelingtoolkit together.
 function my_sigmoid(x)
-    1 / (1 + exp(-x)) * 3
+    1 / (1 + exp(-x)) * 3.
 end
 
 function my_gelu(x)
@@ -216,6 +216,7 @@ using UnPack
 
 
 tmr = TimerOutput();
+
 dy_du = dy2_du = ones(n_variables)
 
 function (f::col_model_node)(yp, y, p, t)
@@ -315,13 +316,12 @@ train_params = [y0_train; parameters] #Concatenating trainable params
 
 prob_node = ODEProblem(f_node, [y0_non_train; y0_train] , tspan, train_params)
 
+BLAS.set_num_threads(1)
+
 #testing ode solution time
 @time solution = solve(prob_node, FBDF(autodiff = false),
  callback = cb2, saveat = t_exp[1:204]); #0.27 seconds after compiling
 
-#Jacobian sparsity
-
-BLAS.set_num_threads(1)
 
 #--------- Training Neural Network ----------
 
@@ -332,13 +332,15 @@ function predict(θ)
     y0_train = @view θ[1:Int(n_variables / 4 * 2)] 
 
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
+    #sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
+    #sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP())
+    sensealg = ForwardDiffSensitivity()
     #----------------------------Problem solution-------------------------------------
-    abstol = 1e-5
-    reltol = 1e-5
+    abstol = 1e-7
+    reltol = 1e-7
     tspan = (0.0, 147.8266667)
     prob_ = remake(prob_node, u0 = [y0_non_train; y0_train], tspan = tspan, p = θ)
-    s_new = Array(solve(prob_, FBDF(autodiff = false), callback = cb2,
+    s_new = Array(solve(prob_, FBDF(autodiff = false), callback = cb2, abstol = abstol, reltol= reltol,
         saveat = t_exp[1:204], sensealg = sensealg))
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
@@ -364,11 +366,13 @@ end
 println("Testing loss ", losvt)
 
 
-loss(θ) = sum(Flux.Losses.mse.((@view data_train[1:4]), (@view predict(θ)[1:4])))
+loss(θ) = sum(Flux.Losses.mse.(data_train[1:4],  predict(θ)[1:4]))
 
+#loss(θ) = sum(abs2, data_train[1] - predict(θ)[1])
 
 θ = copy(train_params)
 @time loss(θ)
-grad = Zygote.gradient(loss, θ)
+@time grad_forward = ForwardDiff.gradient(loss, θ)
+@time grad_reverse = Zygote.gradient(loss, θ)[1]
 
 @show t_exp[1:204]
