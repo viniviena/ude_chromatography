@@ -6,8 +6,8 @@ Pkg.instantiate()
 #Importing ODE, plot and MAT libraries
 using OrdinaryDiffEq
 using DiffEqFlux
-#using DiffEqCallbacks
-using DifferentialEquations
+using DiffEqCallbacks
+#using DifferentialEquations
 using Flux
 using Plots
 using MAT
@@ -23,7 +23,7 @@ include("../utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 20 # Number of finite elements
+n_elements = 25 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 2;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -36,7 +36,7 @@ h = (xₘₐₓ - xₘᵢₙ) / n_elements #finite elements' sizes
 H, A, B = make_OCFEM(n_elements, n_phases, n_components) #make matrices for OCFEM
 
 #Building mass matrix
-MM = make_MM(n_elements, n_phases, n_components) #make mass matrix
+MM = Array(make_MM(n_elements, n_phases, n_components)) #make mass matrix
 
 #-------- Defining PDE parameters------------
 
@@ -52,8 +52,8 @@ kappab = 0.003 * 3 / 245.5E-4 #min -1 (not being used)
 params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
 #Calculating the derivative matrices stencil
-y_dy = A * H^-1 # y = H*a and dy_dx = A*a = (A*H-1)*y
-y_dy2 = B * H^-1 # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
+y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
+y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 #--------Importing experimental data---------------
 vars = matread("../Global_Poh_ProPro.mat")
@@ -79,7 +79,7 @@ net_params4 = Float64.(initial_params(kldf_nn2));
 
 #Here I had to define my own activation functions because I've got error trying to use Flux with modelingtoolkit together.
 function my_sigmoid(x)
-    1 / (1 + exp(-x)) * 3
+    1 / (1 + exp(-x)) * 3.
 end
 
 function my_gelu(x)
@@ -88,40 +88,40 @@ end
 
 #Rebuilding the NNs because I had trouble making modelingtoolkit work with Flux
 function _ann1(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
 
 end
 
 function _ann2(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
 
 end
 
 function _ann3(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
 
 end
 
 function _ann4(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
 
@@ -136,13 +136,17 @@ end
 #As shown above → qᵢ(t = 0, z) =  ANNₑ,ᵢ(c,θₑ,ᵢ)
 
 # cache u0 to put down
-y0_cache = dualcache(ones(n_variables), 12)
-c0 = dualcache([13.230000, 0.00000], 12)
+#y0_cache = dualcache(ones(n_variables), 12)
+#c0 = dualcache([13.230000, 0.00000], 12)
 
-function y_initial(p, (y0_cache, c0))
+y0_cache = ones(n_variables);
+c0 = [13.230000, 0.00000];
 
-    var0 = get_tmp(y0_cache, p)
-    c0 = get_tmp(c0, p)
+function y_initial(θ, y0_cache, c0)
+
+    #var0 = get_tmp(y0_cache, p)
+    #c0 = get_tmp(c0, p)
+    var0 = y0_cache[:]
     j = 0
 
     for i = 1:n_components
@@ -167,8 +171,8 @@ function y_initial(p, (y0_cache, c0))
 
     x1 = (var0[2+0-1:p_order+2*n_elements-3+0+1] .- 6.0) ./ (13.0 - 6.0)
     x2 = (var0[2+(p_order+2*n_elements-2)-1:p_order+2*n_elements-3+(p_order+2*n_elements-2)+1] .- 0.047) ./ (4.0 - 0.047)
-    p11 = @view p[1+2:29+2]
-    p22 = @view p[30+2:60]
+    p11 = @view θ[1+2:29+2]
+    p22 = @view θ[30+2:60]
     q_star1 = _ann1([x1 x2]', p11)
     q_star2 = _ann2([x1 x2]', p22)
     q_star = [q_star1; q_star2]
@@ -192,7 +196,7 @@ end
 
 # building rhs function for DAE solver
 
-struct col_model_node{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10}
+struct col_model_node{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12}
 n_variables::T1
 n_elements::T2
 p_order::T3
@@ -203,6 +207,8 @@ y_dy::T7
 y_dy2::T8
 Pe::T9
 eps::T10
+dy_du::T11
+dy2_du::T12
 end
 
 using TimerOutputs
@@ -211,31 +217,36 @@ using UnPack
 
 tmr = TimerOutput();
 
+dy_du = dy2_du = ones(n_variables)
+
 function (f::col_model_node)(yp, y, p, t)
    #Aliasing parameters
 
-   @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, Pe, eps = f 
+   @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, Pe, eps, dy_du, dy2_du = f 
    
 
-   @timeit tmr "dy_du" dy_du = [y'*(@view y_dy[i, :]) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
-   @timeit tmr "dy2_du" dy2_du = [y'*(@view y_dy2[i, :]) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
+    dy_du = [dot((@view y_dy[i, :]), y) for i in 1:Int(n_variables)] # ∂y/∂u where u is the local spatial coordinate
+    dy2_du = [dot((@view y_dy2[i, :]), y) for i in 1:Int(n_variables)] # ∂²y/∂u² where u is the local spatial coordinate
+   
+   #mul!(dy_du, y_dy, y)
+   #mul!(dy2_du, y_dy2, y)
 
    j = 0
 
    #---------------------Mass Transfer and equilibrium -----------------
 
-   @timeit tmr "view x1" x1 = ((@view y[2+0-1:p_order+2*n_elements-3+0+1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
-   @timeit tmr "view x2" x2 = ((@view y[2+(p_order + 2*n_elements - 2)-1: p_order + 2*n_elements - 3 + (p_order+2*n_elements-2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
-   @timeit tmr "view p1" p1 = @view p[1+2:29+2]
-   p2 = @view p[30+2:60]
-   p3 = @view p[61:61+28]
-   p4 = @view p[61+28+1:end]
-   @timeit tmr "qstar forward" q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
-   @timeit tmr "K_trans_empirical forward" K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
+   x1 = ((@view y[2 + 0 - 1:p_order+2*n_elements - 3+ 0 + 1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
+   x2 = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
+   p1 = @view p[Int(n_variables/2) + 1 + 2:Int(n_variables/2)  + 29 + 2]
+   p2 = @view p[Int(n_variables/2) + 30 + 2:Int(n_variables/2) + 60]
+   p3 = @view p[Int(n_variables/2) + 61:Int(n_variables/2) + 61 + 28]
+   p4 = @view p[Int(n_variables/2) + 61 + 28 + 1:end]
+   q_star = [_ann1([x1 x2]', p1); _ann2([x1 x2]', p2)]
+   K_transf_empirical = [_ann3([x1 x2]', p3); _ann4([x1 x2]', p4)]
 
    #-------------------------------mass balance -----------------
 
-   @timeit tmr "for loop" @inbounds for i = 1:n_components
+   for i = 1:n_components
        #Internal node equations
        cl_idx = 2 + j
        cu_idx = p_order + 2 * n_elements - 3 + j
@@ -251,20 +262,20 @@ function (f::col_model_node)(yp, y, p, t)
 
        #Liquid phase residual
 
-       @. yp[cl_idx:cu_idx] = -(1 - eps) / eps * K_transf_empirical[i, 2:end-1] .* (q_star[i, 2:end-1] .- y[ql_idx:qu_idx]) .- dy_du[cl_idx:cu_idx] / f.h / (f.L / f.u) .+ 1 / Pe * dy2_du[cl_idx:cu_idx] / (f.h^2) / (f.L / f.u)
+       yp[cl_idx:cu_idx] = -(1 - eps) / eps * (@view K_transf_empirical[i, 2:end-1]) .* ((@view q_star[i, 2:end-1]) .- (@view y[ql_idx:qu_idx])) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
 
 
        #Solid phase residual
 
-       @. yp[ql_idx2:qu_idx2] = K_transf_empirical[i, 1:end] .* (q_star[i, :] .- y[ql_idx2:qu_idx2])
+       yp[ql_idx2:qu_idx2] = (@view K_transf_empirical[i, 1:end]) .* ((@view q_star[i, :]) .- (@view y[ql_idx2:qu_idx2]))
 
 
        #Boundary node equations
-       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i])
+       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .- p[i + Int(n_variables/2)])
 
-       yp[cbu_idx] = dy_du[cbu_idx] / h
+       yp[cbu_idx] =  dy_du[cbu_idx] / h
 
-       j = j + f.p_order + 2 * f.n_elements - 2
+       j = j + p_order + 2 * n_elements - 2
    end
    nothing
 end
@@ -277,56 +288,72 @@ dosetimes = inputs[:, 1]
 
 function affect!(integrator)
     ind_t = findall(t -> t == integrator.t, dosetimes)
-    integrator.p[1] = inputs[ind_t[1], 2]
-    integrator.p[2] = inputs[ind_t[1], 3]
+    integrator.p[1 + Int(n_variables/2)] = inputs[ind_t[1], 2]
+    integrator.p[2 + Int(n_variables/2)] = inputs[ind_t[1], 3]
 end
 
 cb2 = PresetTimeCallback(dosetimes, affect!, save_positions=(false, false))
 
 # Building ODE problem
-rhs = col_model_node(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, params_ode[7], params_ode[8]);
+rhs = col_model_node(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, params_ode[7], params_ode[8], dy_du, dy2_du);
+
 f_node = ODEFunction(rhs, mass_matrix = MM)
-tspan = (0.0f0, 147.8266667f0)
-p = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params
-y0 = y_initial(p, (y0_cache, c0))
-prob_node = ODEProblem(f_node, y0, tspan, p)
 
+tspan = (0.0, 147.8266667)
 
-#testing solution time
-
-@time solution = Array(solve(prob_node, Rodas5(autodiff=false), callback=cb2,
-    abstol=1e-5, reltol=1e-5,
-    saveat=t_exp[1:204])) #0.27 seconds after compiling
-
-#--------- Training Neural Network ----------
+parameters = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4] #injection concentration augumented with ANN params)
 
 qa_index = Int(n_variables / 4 * 2 + 1):Int(n_variables / 4 * 3) #indices for taking q₁
 qb_index = Int(n_variables / 4 * 3 + 1):n_variables #indices for taking q₂
+
+#----- trainable ics
+y0 = y_initial(parameters, y0_cache, c0)
+y0_non_train = y0[1:Int(n_variables / 4 * 2)]
+y0_train = y0[Int(n_variables / 4 * 2 + 1):end]
+
+#------------setting up ode problem
+train_params = [y0_train; parameters] #Concatenating trainable params
+
+prob_node = ODEProblem(f_node, [y0_non_train; y0_train] , tspan, train_params)
+
+BLAS.set_num_threads(1)
+
+#testing ode solution time
+@time solution = solve(prob_node, FBDF(autodiff = false),
+ callback = cb2, saveat = t_exp[1:204]); #0.27 seconds after compiling
+
+
+#--------- Training Neural Network ----------
 
 #Prediction function
 
 function predict(θ)
     #------------------------Initial condition---------------------------------------
-    y0 = y_initial(θ, (y0_cache, c0)) # As mentioned, I have to update initial conditions at every θ update
+    y0_train = @view θ[1:Int(n_variables / 4 * 2)] 
 
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec=ReverseDiffVJP())
+    #sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
+    sensealg = BacksolveAdjoint(autojacvec = ReverseDiffVJP(false))
+    #sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
+    #sensealg = ForwardDiffSensitivity()
     #----------------------------Problem solution-------------------------------------
-    abstol = 1e-5
-    reltol = 1e-5
-    prob_ = remake(prob_node, u0=y0, tspan=tspan, p=θ)
-    s_new = Array(solve(prob_, Rodas5(autodiff=false), callback=cb2, sensealg=sensealg,
-        saveat=t_exp[1:204], abstol=abstol, reltol=reltol))
+    abstol = 1e-7
+    reltol = 1e-7
+    tspan = (0.0, 148.0)
+    prob_ = remake(prob_node, u0 = [y0_non_train; y0_train], tspan = tspan, p = θ)
+    s_new = Array(solve(prob_, FBDF(autodiff = false), callback = cb2, abstol = abstol, reltol= reltol,
+        saveat = t_exp[1:204], sensealg = sensealg))
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
-    [s_new[Int(n_variables / 4), 1:end], s_new[Int(n_variables / 2), 1:end],
+    [s_new[Int(n_variables / 4), 1:204], s_new[Int(n_variables / 2), 1:204],
         s_new[qa_index, [44, 84, 124, 163, 204]], s_new[qb_index, [44, 84, 124, 163, 204]]]
 end
 
 #Setting up training data
 data_train = [exp_data[1:204, 1], exp_data[1:204, 2],
-    repeat(q_exp_data[:, 2]', Int(n_variables / 4)), repeat(q_exp_data[:, 4]', Int(n_variables / 4))]
+    repeat(q_exp_data[:, 2]', Int(n_variables / 4)),
+    repeat(q_exp_data[:, 4]', Int(n_variables / 4))];
 
 # Setting up loss function for using with galactic
 function loss_dae(θ)
@@ -336,16 +363,17 @@ function loss_dae(θ)
 end
 
 #testing loss
-@time losvt, pred_123 = loss_dae([11.64; 0.95; net_params1; net_params2; net_params3; net_params4])
-println("Testing loss", losvt)
+@time losvt, pred_123 = loss_dae(train_params);
+println("Testing loss ", losvt)
 
 
-#Here I set up another loss function to use in a home made Adam, because I was not able to use SciML or flux to train it.
+loss(θ) = sum(Flux.Losses.mse.(data_train[1:4],  predict(θ)[1:4]))
 
-loss(θ) = sum(Flux.Losses.mse.(data_train[1:4], predict(θ)[1:4]))
+#loss(θ) = sum(abs2, data_train[1] - predict(θ)[1])
 
-θ = [11.64; 0.95; net_params1; net_params2; net_params3; net_params4]
-loss(θ)
-grad = Zygote.gradient(loss, θ)
+θ = copy(train_params)
+@time loss(θ)
+#@time grad_forward = ForwardDiff.gradient(loss, θ)
+@time grad_reverse = Zygote.gradient(loss, θ)[1]
 
 @show t_exp[1:204]
