@@ -6,8 +6,8 @@ Pkg.instantiate()
 #Importing ODE, plot and MAT libraries
 using OrdinaryDiffEq
 using DiffEqFlux
-#using DiffEqCallbacks
-using DifferentialEquations
+using DiffEqCallbacks
+#using DifferentialEquations
 using Flux
 using Plots
 using MAT
@@ -88,40 +88,40 @@ end
 
 #Rebuilding the NNs because I had trouble making modelingtoolkit work with Flux
 function _ann1(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
 
 end
 
 function _ann2(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     (w2 * (tanh.(w1 * u .+ b1)) .+ b2)
 
 end
 
 function _ann3(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
 
 end
 
 function _ann4(u, p)
-    w1 = reshape(p[1:2*7], 7, 2)
-    b1 = p[2*7+1:3*7]
-    w2 = reshape(p[3*7+1:3*7+1*7], 1, 7)
-    b2 = p[4*7+1:end]
+    w1 = reshape((@view p[1:2*7]), 7, 2)
+    b1 = @view p[2*7+1:3*7]
+    w2 = reshape((@view p[3*7+1:3*7+1*7]), 1, 7)
+    b2 = @view p[4*7+1:end]
 
     my_sigmoid.((w2 * (tanh.(w1 * u .+ b1)) .+ b2))
 
@@ -235,8 +235,8 @@ function (f::col_model_node)(yp, y, p, t)
 
    #---------------------Mass Transfer and equilibrium -----------------
 
-   x1 = ((@view y[2+0-1:p_order+2*n_elements-3+0+1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
-   x2 = ((@view y[2+(p_order + 2*n_elements - 2)-1: p_order + 2*n_elements - 3 + (p_order+2*n_elements-2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
+   x1 = ((@view y[2 + 0 - 1:p_order+2*n_elements - 3+ 0 + 1]) .- 6.0) ./ (13.0 - 6.0) #Scaling dependent variables
+   x2 = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.047) ./ (4.0 - 0.047) #scaling dependent variables
    p1 = @view p[Int(n_variables/2) + 1 + 2:Int(n_variables/2)  + 29 + 2]
    p2 = @view p[Int(n_variables/2) + 30 + 2:Int(n_variables/2) + 60]
    p3 = @view p[Int(n_variables/2) + 61:Int(n_variables/2) + 61 + 28]
@@ -332,20 +332,21 @@ function predict(θ)
     y0_train = @view θ[1:Int(n_variables / 4 * 2)] 
 
     # --------------------------Sensealg---------------------------------------------
-    #sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())
-    #sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP())
-    sensealg = ForwardDiffSensitivity()
+    #sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
+    sensealg = BacksolveAdjoint(autojacvec = ReverseDiffVJP(false))
+    #sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
+    #sensealg = ForwardDiffSensitivity()
     #----------------------------Problem solution-------------------------------------
     abstol = 1e-7
     reltol = 1e-7
-    tspan = (0.0, 147.8266667)
+    tspan = (0.0, 148.0)
     prob_ = remake(prob_node, u0 = [y0_non_train; y0_train], tspan = tspan, p = θ)
     s_new = Array(solve(prob_, FBDF(autodiff = false), callback = cb2, abstol = abstol, reltol= reltol,
         saveat = t_exp[1:204], sensealg = sensealg))
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
-    [s_new[Int(n_variables / 4), 1:end], s_new[Int(n_variables / 2), 1:end],
+    [s_new[Int(n_variables / 4), 1:204], s_new[Int(n_variables / 2), 1:204],
         s_new[qa_index, [44, 84, 124, 163, 204]], s_new[qb_index, [44, 84, 124, 163, 204]]]
 end
 
@@ -372,7 +373,7 @@ loss(θ) = sum(Flux.Losses.mse.(data_train[1:4],  predict(θ)[1:4]))
 
 θ = copy(train_params)
 @time loss(θ)
-@time grad_forward = ForwardDiff.gradient(loss, θ)
+#@time grad_forward = ForwardDiff.gradient(loss, θ)
 @time grad_reverse = Zygote.gradient(loss, θ)[1]
 
 @show t_exp[1:204]

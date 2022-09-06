@@ -48,23 +48,14 @@ prob_trueode = ODEProblem(trueODEfunc, u0, tspan, 1.0)
 datasize = 151
 tsteps = range(tspan[1], tspan[2], length = datasize)
 
-#callback
-inputs  = [0.0 1.0; 100.0 2.0]
-dosetimes = inputs[:,1]
 
-function affect!(integrator)
-    ind_t = findall(t -> t==integrator.t, dosetimes)
-    integrator.p = inputs[ind_t[1], 2]
-end
- 
-cb2 = PresetTimeCallback(dosetimes, affect!, save_positions = (false, false));
+ode_data = Array(solve(prob_trueode, AutoVern9(KenCarp4(autodiff = false)),
+                  saveat = tsteps))[1, 1:end]
 
-ode_data = Array(solve(prob_trueode, Rodas4(autodiff = true),
-                  saveat = tsteps, callback = cb2))[1, 1:end]
-
-ode_data2 = [Qₘ*1.0*K/(1 + 1.0*K); Qₘ*2.0*K/(1 + 2.0*K)]
+ode_data2 = [Qₘ*ode_data[end]*K/(1 + ode_data[end]*K)]
 
 train_data = [ode_data, ode_data2]
+
 #---------------neural ode
 
 import Random
@@ -91,24 +82,17 @@ function dudt(du,u,p,t)
     du[2] = k_transf*(q_star - u[2])
 end
 
-#callback
-inputs  = [0.0 1.0; 100.0 2.0]
-
-function affect_node!(integrator)
-    ind_t = findall(t -> t==integrator.t, dosetimes)
-    integrator.p[1] = inputs[ind_t[1], 2]
-end
- 
-cb_node = PresetTimeCallback(dosetimes, affect_node!, save_positions = (false, false));
 
 θ = [1.0; _ann1(c0, net_params1); net_params1]
+
+@show u0
+
 prob_ude = ODEProblem(dudt, u0, tspan, θ)
 
 sol_node = Array(solve(prob_ude, AutoVern9(KenCarp4(autodiff = false)),
-                  saveat = tsteps, callback = cb_node))
+                  saveat = tsteps))
 
 # training neural ode
-
 
 function predict(θ)
 u0 = [c0, θ[2]]
@@ -118,8 +102,8 @@ sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
 prob_ = remake(prob_ude, u0 = u0, tspan = tspan, p = θ)
 
 sol_node = Array(solve(prob_, AutoVern9(KenCarp4(autodiff = false)), sensealg = sensealg, 
-                  saveat = tsteps, callback = cb_node))
-[sol_node[1, 1:end], sol_node[2, [101, 150]]]
+                  saveat = tsteps))
+[sol_node[1, 1:end], sol_node[2, end]]
 
 end
 
@@ -130,4 +114,4 @@ pred = predict(θ)
 sum(Flux.Losses.mse.(train_data[1:2], pred[1:2]))
 end
 
-grad = Zygote.gradient(loss, θ)
+@time grad = Zygote.gradient(loss, θ)[1]
