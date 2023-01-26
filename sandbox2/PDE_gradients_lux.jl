@@ -77,8 +77,7 @@ y_dy2 = round_zeros.(Array(B * H^-1)) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("traindata_improved_quad_sips_25min.csv", ',', Float64)
- # solid phase concentration measurements
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_25min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -161,8 +160,6 @@ function y_initial(y0_cache, c0)
 
 end
 
-
-#----------- interpolation exogeneous ------
 
 y0 =  y_initial(y0_cache, c0)
 
@@ -281,7 +278,7 @@ tsave = c_exp_data[2:end, 1]
 
 function predict(θ)
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
+    sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
 
     #----------------------------Problem solution-------------------------------------
     abstol = reltol = 5e-7
@@ -393,7 +390,7 @@ plot!([error_mean], seriestype="vline")
 
 #----model loading
 using DelimitedFiles
-best_p = Float32.(readdlm("best_improved_quad_22neurons_40fe_sips_tanh_25min.csv"))
+best_p = Float32.(readdlm("trained_models/best_improved_quad_22neurons_40fe_sips_tanh_25min.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
 best_w = deepcopy(results.u)
 neurons = 22

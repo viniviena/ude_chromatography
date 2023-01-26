@@ -79,7 +79,7 @@ y_dy2 = round_zeros.(Array(B * H^-1)) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_improved_quad_sips_25min.csv", ',', Float64) # solid phase concentration measurements
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_1min.csv", ',', Float64) # solid phase concentration measurements
 
 
 # -----Initializing Neural networks---------
@@ -91,8 +91,8 @@ rng = Random.default_rng()
 Random.seed!(rng, 2)
 
 nn = Lux.Chain(
-  Lux.Dense(2, 22, tanh_fast),
-  Lux.Dense(22, 1)
+  Lux.Dense(2, 17, tanh_fast),
+  Lux.Dense(17, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
@@ -191,7 +191,6 @@ end
 #using TimerOutputs
 using UnPack
 
-
 dy_du = dy2_du = ones(Float64, n_variables)
 
 
@@ -265,7 +264,6 @@ y0 = y_initial(y0_cache, c0)
 tspan = (0.00e0, 130.00e0) 
 
 prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
-
 
 
 #using MKL
@@ -566,106 +564,3 @@ push!(uptake, Axis([Plots.Linear(solution_optim.t[1:end], learned_kinetics[1:end
 
 
 save("plots/uptake_improved_quad_sips_lowsample.pdf", uptake)
-
-
-
-
-#-----------------pSGLD()
-using ProgressBars
-using Printf
-
-beta = 0.99;
-λ = 1e-5;
-V_θ = zeros(length(θ))
-a = 0.05; #0.0001; #try making this larger
-b = 0.05;
-γ = 0.10;
-
-#Visualizing Δt stepping
-t = 1:2000
-y = @. a*(b + t)^(-γ)
-plot(t,y)
-
-
-function train_loop(θ, V_θ, iters, log_likelihod, log_regularization, params_log)
-    t_count = 1
-    y0 = y_initial(θ, y0_cache, c0)
-    for t in iters
-
-        ∇Likelihood = Zygote.gradient(θ -> loss_initial(θ, y0), θ)[1]
-        ∇Prior = Zygote.gradient(regularization, θ)[1]
-
-        if t == 1
-            V_θ[:] = ∇Likelihood .* ∇Likelihood
-        else
-            V_θ *= beta
-            V_θ += (1 - beta) * (∇Likelihood .* ∇Likelihood)
-        end
-
-        m = λ .+ sqrt.(V_θ)
-        ϵ = a * (b + t_count)^-γ
-
-        noise = sqrt.(ϵ./m).*randn(length(θ))
-
-        θ = θ  - (0.5* ϵ * (∇Likelihood + ∇Prior) ./ m + noise)
-
-        y0 = y_initial(θ, y0_cache, c0)
-
-        
-        loss_value = loss(θ, y0)
-        reg = regularization(θ)
-        set_description(iters, string(@sprintf("Loss train %.4e regularization %.4e", loss_value, reg)))
-        push!(log_likelihod, loss_value)
-        push!(log_regularization, reg)
-        push!(params_log, θ)
-        
-
-        t_count += 1
-
-    end
-    θ
-end
-
-
-log_likelihod = []
-log_regularization = []
-params_log = []
-n_iters = 2000
-iters = ProgressBar(1:n_iters)
-
-train_loop(θ, V_θ, iters, log_likelihod, log_regularization, params_log)
-
-aaa = [params_log[i][4] for i in 1:size(params_log, 1)]
-plot(aaa[1970:2270])
-plot(log_likelihod[1876:1976])
-minimum(log_likelihod[1:end])
-argmin(log_likelihod[1:end])
-
-
-y0_best = y_initial(params_log[1976], y0_cache, c0)
-sol_best  = predict(params_log[1976], y0_best)
-
-plot(t_exp[1:204], sol_best[1], label = nothing)
-scatter!(t_exp[1:204], data_train[1], label = nothing)
-
-x1 = (q_exp_data[:, 1].- 6.00)/(13.00 - 6.00)
-x2 = (q_exp_data[:, 3] .- 0.047)/(4.00 - 0.047)
-ax1 = scatter(q_exp_data[:, 1], q_exp_data[:, 2], label = nothing)
-ax2 = scatter(q_exp_data[:, 3], q_exp_data[:, 4], label = nothing)
-
-q1_pred_best = _ann1([x1 x2]', params_log[1976][1: 29])
-q2_pred_best = _ann2([x1 x2]', params_log[1976][30: 30 + 28])
-
-for i in 0:100
-    global ax1, ax2
-    θ_sampled = params_log[1976 + i]
-    q1_pred = _ann1([x1 x2]', θ_sampled[1: 29])
-    q2_pred = _ann2([x1 x2]', θ_sampled[30: 30 + 28])
-    plot!(ax1, q_exp_data[:, 1], q1_pred[1, :], alpha=0.2, color="#BBBBBB", label = nothing)
-    plot!(ax2, q_exp_data[:, 3], q2_pred[1, :], label = nothing, alpha=0.2, color="#BBBBBB")
-end
-
-scatter(ax1, q_exp_data[:, 1], q_exp_data[:, 2], label = nothing)
-scatter(ax2, q_exp_data[:, 3], q_exp_data[:, 4], label = nothing)
-plot!(ax1, q_exp_data[:, 1], q1_pred_best[1, :], label = nothing)
-plot!(ax2, q_exp_data[:, 3], q2_pred_best[1, :], label = nothing)
