@@ -53,7 +53,6 @@ epsilon = 0.5e0 # void fraction
 u = Qf / (a * epsilon) #dm/min (drif velocity)
 Dax = 0.7e0*0.1089e0*10^-2e0*60.0e0 + 0.5e0*dp*u
 Pe = u*L/Dax
-
 cin =  5.5e0
 qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
 k_iso = 1.8e0
