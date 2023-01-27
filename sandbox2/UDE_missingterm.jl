@@ -230,13 +230,15 @@ saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_dat
 
 #Veryfing UDE fitting quality
 c_exp_data = readdlm("train_data/traindata_improved_quad_sips_25min.csv", ',', Float64)
-scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
-plot!(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
+
+fig = scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
+plot!(fig, solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
+savefig(fig, "UDE_fitting_example.png")
 
 #Creating missing term function
-c_ = solution_optim[Int(n_variables/2) - 5, 1:end]
+c_ = solution_optim[Int(n_variables/2) - 10, 1:end]
 qeq_ = qmax*k_iso.*c_.^1.50./(1 .+ k_iso.*c_.^1.50)./q_test
-q_ = Array(solution_optim)[Int(n_variables) - 5, 1:end]./q_test
+q_ = Array(solution_optim)[Int(n_variables) - 10, 1:end]./q_test
 X_scaled = [qeq_ q_]' #Predictors
 U = nn(X_scaled, best_w, st)[1] #Missing term/interaction
 
@@ -287,13 +289,13 @@ Plots.plot(problem_regression)
 
 #Sparse regression
 options = DataDrivenCommonOptions(
-    maxiters = 10_000, normalize = DataNormalization(),
-     selector = bic, digits = 5,
+    maxiters = 20_000, normalize = DataNormalization(),
+     selector = aic, digits = 6,
     data_processing = DataProcessing(split = 1.0, batchsize = size(X, 2), 
     shuffle = false, rng = StableRNG(1111)))
 
 
-opt = STLSQ(exp10.(-1.35:0.01:10.0)) # λ < exp10(-1.35) gives error
+opt = STLSQ(exp10.(-1.6:0.01:10.0)) # λ < exp10(-1.35) gives error
 opt2 = SR3(exp10.(-20.0:0.5:10.0)) # Fails
 res = solve(problem_regression, basis, opt, options = options)
 system = get_basis(res)
@@ -301,5 +303,5 @@ pas = get_parameter_map(system)
 
 println(res)
 println(system)
-
-Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
+fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
+savefig(fig2, "sparse_reg_example.png")
