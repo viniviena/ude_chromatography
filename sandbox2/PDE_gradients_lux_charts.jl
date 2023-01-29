@@ -58,7 +58,7 @@ cin =  5.5e0
 qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
 k_iso = 1.8e0
 #q_test = 25.0*cin^0.6
-q_test = qmax*k_iso*cin^1.0/(1 + k_iso*cin^1.0)
+q_test = qmax*k_iso*cin^1.5/(1 + k_iso*cin^1.5)
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
@@ -79,7 +79,7 @@ y_dy2 = round_zeros.(Array(B * H^-1)) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_kldf_lang_1min.csv", ',', Float64) # solid phase concentration measurements
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_1min.csv", ',', Float64) # solid phase concentration measurements
 
 
 # -----Initializing Neural networks---------
@@ -91,8 +91,8 @@ rng = Random.default_rng()
 Random.seed!(rng, 2)
 
 nn = Lux.Chain(
-  Lux.Dense(2, 20, tanh_fast),
-  Lux.Dense(20, 1)
+  Lux.Dense(2, 17, tanh_fast),
+  Lux.Dense(17, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
@@ -149,7 +149,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -206,7 +206,7 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso*abs.(c).^1.00./(1.0 .+ k_iso.*abs.(c).^1.00)/q_test
+   q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
    #q_eq = 25.0*abs.(c).^0.6/q_test
    #q_eq = interpolator.(c)/q_test
 
@@ -340,10 +340,10 @@ using ReverseDiff
 
 #----model loading
 using DelimitedFiles
-best_p = Float64.(readdlm("trained_models/best_kldf_21neurons_40fe_lang_1min.csv"))
+best_p = Float64.(readdlm("trained_models/best_improved_quad_17neurons_35fe_sips_scaled_tanh_1min.csv"))
 best_w = deepcopy((Lux.ComponentArray(p_init)))
-best_w = deepcopy(results_2.u)
-neurons = 20
+#best_w = deepcopy(results_2.u)
+neurons = 17
 best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
@@ -362,14 +362,14 @@ plot(solution_optim.t, Array(solution_optim)[Int(n_variables/2), :])
 loss(best_w)
 
 c_ = solution_optim[Int(n_variables/2), 1:end]
-qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
+qeq_ = qmax*k_iso.*c_.^1.50./(1 .+ k_iso.*c_.^1.50)./q_test
 #qeq_f = 25.0*c_.^0.6./q_test
 q_ = Array(solution_optim)[Int(n_variables), 1:end]./q_test
 
 learned_kinetics = nn([qeq_ q_]', best_w, st)[1]
 plot(solution_optim.t[1:end], learned_kinetics[:])
 
-true_dqdt = readdlm("test_data/true_dqdt_kldf_lang.csv", ',')
+true_dqdt = readdlm("test_data/true_dqdt_improved_quad_sips_1min.csv", ',')
 
 
 #----------------Desorption and extrapolation
@@ -413,7 +413,7 @@ function (f::col_model_node_test)(yp, y, p, t)
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
     #q_eq  = qmax*k_iso*c./(1.0 .+ k_iso.*c)/q_test
     #q_eq = 25.0*abs.(c).^0.6/q_test
-    q_eq  = qmax*k_iso*abs.(c).^1.00./(1.0 .+ k_iso.*abs.(c).^1.00)/q_test
+    q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
 
     q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0)./q_test #scaling dependent variables
     x1x2 =  [q_eq q]'
@@ -460,13 +460,13 @@ using DataInterpolations
 
 
 
-t_interp = [0.0:5.0:130.0; 130.0000001; 160.00:5.:250.0; 250.0000001; 270.0:5.0:400.]
+#= t_interp = [0.0:5.0:130.0; 130.0000001; 160.00:5.:250.0; 250.0000001; 270.0:5.0:400.]
 c_interp = [fill(5.50, size(0.0:5.0:130.0, 1)); 3.5851; fill(3.5851, size(160.00:5.:250.0, 1)); 7.33;
- fill(7.33, size(270.0:5.0:400.0, 1))]
+ fill(7.33, size(270.0:5.0:400.0, 1))] =#
 
-#= t_interp = [0.0:0.1:130.; 130.0000001; 140.00:5.:250.; 250.0000001; 260.0:5.0:500.]
+t_interp = [0.0:0.1:130.; 130.0000001; 140.00:5.:250.; 250.0000001; 260.0:5.0:500.]
 c_interp = [fill(5.5, size(0.0:0.1:130., 1)); 0.75; fill(0.75, size(140.00:5.:250., 1)); 9.33;
-fill(9.33, size(260.0:5.0:500., 1))] =#
+fill(9.33, size(260.0:5.0:500., 1))]
 
 c_in_t = LinearInterpolation(c_interp, t_interp)
 
@@ -481,9 +481,9 @@ prob_node_test = ODEProblem(f_node_test, y0, tspan_test, best_w)
 
 test_rate = 1.0
 @time solution_test = Array(solve(prob_node_test, FBDF(autodiff = false), 
-abstol = 1e-6, reltol = 1e-6, saveat = test_rate,  tstops = [0.0, 130., 250])); #0.27 seconds after compiling
+abstol = 1e-7, reltol = 1e-7, saveat = test_rate,  tstops = [0.0, 130., 250])); #0.27 seconds after compiling
 
-test_data = readdlm("test_data/testdata_kldf_lang_1min.csv", ',')
+test_data = readdlm("test_data/testdata_improved_quad_sips_1min.csv", ',')
 
 using PGFPlots
 
@@ -497,9 +497,9 @@ push!(history, Axis([Plots.Linear(0.0:test_rate:130.0 |> collect, solution_test[
             Plots.Node("Test data", 210, 7, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {0, 2, 4, 6, 8, 10}, xtick = {0, 40, 80,...,400}, legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = 0, ymax = 10, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Langmuir isotherm - LDF"))
+       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/kldf_lang_history.pdf", history)       
+save("plots/improved_quad_sips_history.pdf", history)       
 
 
 history_error = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
@@ -510,9 +510,9 @@ push!(history_error, Axis([Plots.Linear(0.0:test_rate:130.0 |> collect, solution
             Plots.Node("Test data", 210, 0.25, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {-0.4,-0.2, 0.0, 0.2, 0.4}, xtick = {0, 40, 80,...,400},  legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = -0.4, ymax = 0.4, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Langmuir isotherm - LDF"))
+       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/kldf_lang_history_error.pdf", history_error)
+save("plots/improved_quad_sips_history_error.pdf", history_error)
 
 
 
@@ -555,8 +555,8 @@ uptake = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2
 push!(uptake, Axis([Plots.Linear(solution_optim.t[1:end], learned_kinetics[1:end], mark = "none", style = "blue", legendentry = "ANN prediction"),
             Plots.Linear(true_dqdt[1:end, 1], true_dqdt[1:end, 2], onlyMarks=true, style = "blue, mark = *, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "True uptake rate (train)"),
 ],
-        legendPos="north east", style = "grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120}", xmin = 0, xmax = 120, ymin = 0, ymax = 7, width = "16cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Langmuir isotherm - LDF"))
+        legendPos="north east", style = "grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120}", xmin = 0, xmax = 120, ymin = 0, ymax = 7, width = "14cm", height = "6cm", xlabel = "time [min]",
+       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
 
-save("plots/uptake_kldf_lang.pdf", uptake)
+save("plots/uptake_improved_quad_sips.pdf", uptake)
