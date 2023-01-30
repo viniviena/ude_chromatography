@@ -34,7 +34,7 @@ nn = Lux.Chain(
 
 p_init, st = Lux.setup(rng, nn)
 
-best_p = Float32.(readdlm("trained_models/best_improved_quad_22neurons_40fe_sips_tanh_25min.csv"))
+best_p = Float32.(readdlm("trained_models/best_improved_kldf_22neurons_33fe_lang_1min.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
 neurons = 22
 best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
@@ -79,7 +79,7 @@ cin =  5.5e0
 qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
 k_iso = 1.8e0
 #q_test = 25.0*cin^0.6
-q_test = qmax*k_iso*cin^1.5/(1 + k_iso*cin^1.5)
+q_test = qmax*k_iso*cin^1.0/(1 + k_iso*cin^1.0)
 
 
 #Calculating the derivative matrices stencil
@@ -121,7 +121,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5) #Sips isotherm
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0) #Sips isotherm
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -176,7 +176,7 @@ function (f::col_model_node1)(yp, y, p, t)
     #---------------------Mass Transfer and equilibrium -----------------
 
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-    q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
+    q_eq  = qmax*k_iso*abs.(c).^1.00./(1.0 .+ k_iso.*abs.(c).^1.00)/q_test
     #q_eq = 25.0*abs.(c).^0.6/q_test
     #q_eq = interpolator.(c)/q_test
 
@@ -201,12 +201,12 @@ function (f::col_model_node1)(yp, y, p, t)
 
         #Liquid phase residual
         
-        yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1]) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+        yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1])*q_test/130.0 .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
 
 
         #Solid phase residual
 
-        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
+        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])*q_test/130.0
 
         #ex_[i](t)
         #Boundary node equations
@@ -217,30 +217,32 @@ function (f::col_model_node1)(yp, y, p, t)
     nothing
 end
     
-    
+ 
+#Importing experimental data
+c_exp_data = readdlm("train_data/traindata_improved_kldf_lang_1min.csv", ',', Float64)
+
+
 # Building UDE problem
 rhs = col_model_node1(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
 Pe, epsilon, cin, dy_du, dy2_du);
 f_node = ODEFunction(rhs, mass_matrix = MM)
 prob_node22 = ODEProblem(f_node, y0, (first(c_exp_data[:, 1]), last(c_exp_data[:, 1])), best_w)
-saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_data[:, 1])
+saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/5:last(c_exp_data[:, 1])
 
 #Solving UDE Problem
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), saveat = saveats, abstol = 1e-7, reltol = 1e-7); #0.27 seconds after compiling
 
 #Veryfing UDE fitting quality
-c_exp_data = readdlm("train_data/traindata_improved_quad_sips_25min.csv", ',', Float64)
-
-fig = scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
+fig = Plots.scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
 plot!(fig, solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
 savefig(fig, "UDE_fitting_example.png")
 
 #Creating missing term function
-c_ = solution_optim[Int(n_variables/2) - 10, 1:end]
-qeq_ = qmax*k_iso.*c_.^1.50./(1 .+ k_iso.*c_.^1.50)./q_test
-q_ = Array(solution_optim)[Int(n_variables) - 10, 1:end]./q_test
+c_ = solution_optim[Int(n_variables/2) - 5, 1:end]
+qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
+q_ = Array(solution_optim)[Int(n_variables) - 5, 1:end]./q_test
 X_scaled = [qeq_ q_]' #Predictors
-U = nn(X_scaled, best_w, st)[1] #Missing term/interaction
+U = nn(X_scaled, best_w, st)[1]*q_test/130.0 #Missing term/interaction
 
 Plots.plot(solution_optim.t[1:end], U[:])
 
@@ -268,7 +270,7 @@ using StableRNGs
 z = collect(z)
 
 polys = []
-for i ∈ -1:3, j ∈ -1:3
+for i ∈ -1:4, j ∈ -1:4
     poli2 = z[1]^i * z[2]^j
     push!(polys, poli2)
 end
@@ -280,7 +282,7 @@ basis = Basis(h__f, z)
 
 #Defining limits to make the problem more simetric (See in Figure)
 lower = 20 
-upper = size(solution_optim.t, 1) - 150
+upper = size(solution_optim.t, 1) - 180
 
 X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
 Y = reshape(U[lower:1:upper], 1, size(U[lower:1:upper])[1])
@@ -289,17 +291,17 @@ Plots.plot(problem_regression)
 
 #Sparse regression
 options = DataDrivenCommonOptions(
-    maxiters = 20_000, normalize = DataNormalization(),
-     selector = aic, digits = 6,
+    maxiters = 15_000, normalize = DataNormalization(),
+     selector = bic, digits = 5,
     data_processing = DataProcessing(split = 1.0, batchsize = size(X, 2), 
     shuffle = false, rng = StableRNG(1111)))
 
 
-opt = STLSQ(exp10.(-1.6:0.01:10.0)) # λ < exp10(-1.35) gives error
-opt2 = SR3(exp10.(-20.0:0.5:10.0)) # Fails
+opt = STLSQ(exp10.(-3.1:0.05:2.0)) # λ < exp10(-1.35) gives error
 res = solve(problem_regression, basis, opt, options = options)
 system = get_basis(res)
 pas = get_parameter_map(system)
+bic(res)
 
 println(res)
 println(system)
