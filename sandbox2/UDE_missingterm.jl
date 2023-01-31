@@ -28,15 +28,15 @@ rng = Random.default_rng()
 Random.seed!(rng, 13)
 
 nn = Lux.Chain(
-  Lux.Dense(2, 22, tanh_fast),
-  Lux.Dense(22, 1)
+  Lux.Dense(2, 20, tanh_fast),
+  Lux.Dense(20, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
 
-best_p = Float32.(readdlm("trained_models/best_improved_kldf_22neurons_33fe_lang_1min.csv"))
+best_p = Float32.(readdlm("trained_models/best_kldf_21neurons_40fe_lang_1min.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
-neurons = 22
+neurons = 20
 best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
@@ -201,12 +201,12 @@ function (f::col_model_node1)(yp, y, p, t)
 
         #Liquid phase residual
         
-        yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1])*q_test/130.0 .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+        yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1]) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
 
 
         #Solid phase residual
 
-        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])*q_test/130.0
+        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
         #ex_[i](t)
         #Boundary node equations
@@ -219,7 +219,7 @@ end
     
  
 #Importing experimental data
-c_exp_data = readdlm("train_data/traindata_improved_kldf_lang_1min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_kldf_lang_1min.csv", ',', Float64)
 
 
 # Building UDE problem
@@ -227,7 +227,7 @@ rhs = col_model_node1(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2,
 Pe, epsilon, cin, dy_du, dy2_du);
 f_node = ODEFunction(rhs, mass_matrix = MM)
 prob_node22 = ODEProblem(f_node, y0, (first(c_exp_data[:, 1]), last(c_exp_data[:, 1])), best_w)
-saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/5:last(c_exp_data[:, 1])
+saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/2:last(c_exp_data[:, 1])
 
 #Solving UDE Problem
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), saveat = saveats, abstol = 1e-7, reltol = 1e-7); #0.27 seconds after compiling
@@ -237,12 +237,26 @@ fig = Plots.scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
 plot!(fig, solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
 savefig(fig, "UDE_fitting_example.png")
 
-#Creating missing term function
-c_ = solution_optim[Int(n_variables/2) - 5, 1:end]
-qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
-q_ = Array(solution_optim)[Int(n_variables) - 5, 1:end]./q_test
-X_scaled = [qeq_ q_]' #Predictors
-U = nn(X_scaled, best_w, st)[1]*q_test/130.0 #Missing term/interaction
+#Creating missing term function~
+q_eq_vec = []
+q_vec = []
+U_vec = []
+lower = 30 
+upper = size(solution_optim.t, 1) - 100
+for i in 0:10:20
+    c_ = solution_optim[Int(n_variables/2) - i, lower:upper]
+    qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
+    push!(q_eq_vec, qeq_)
+    q_ = Array(solution_optim)[Int(n_variables) - i, lower:upper]./q_test
+    push!(q_vec, q_)
+    X_scaled = [qeq_ q_]' #Predictors
+    U = nn(X_scaled, best_w, st)[1] #Missing term/interaction
+    push!(U_vec, U)
+end
+
+U_vec = transpose(mapreduce(permutedims, vcat, U_vec))
+q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
+q_vec = mapreduce(permutedims, hcat, q_vec)
 
 Plots.plot(solution_optim.t[1:end], U[:])
 
@@ -270,7 +284,7 @@ using StableRNGs
 z = collect(z)
 
 polys = []
-for i ∈ -1:4, j ∈ -1:4
+for i ∈ -1:3, j ∈ -1:3
     poli2 = z[1]^i * z[2]^j
     push!(polys, poli2)
 end
@@ -281,29 +295,52 @@ basis = Basis(h__f, z)
 #Defining datadriven problem
 
 #Defining limits to make the problem more simetric (See in Figure)
-lower = 20 
-upper = size(solution_optim.t, 1) - 180
+#= lower = 20 
+upper = size(solution_optim.t, 1) - 180 =#
 
-X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
-Y = reshape(U[lower:1:upper], 1, size(U[lower:1:upper])[1])
-problem_regression = DirectDataDrivenProblem(X, Y)
+#X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
+#Y = reshape(U[lower:1:upper], 1, size(U[lower:1:upper])[1])
+
+X_expanded = [q_eq_vec[1:1:end]'*q_test; q_vec[1:1:end]'*q_test]
+Y_expanded = U_vec
+problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
 #Sparse regression
 options = DataDrivenCommonOptions(
     maxiters = 15_000, normalize = DataNormalization(),
-     selector = bic, digits = 5,
-    data_processing = DataProcessing(split = 1.0, batchsize = size(X, 2), 
+    selector = bic, digits = 5,
+    data_processing = DataProcessing(split = 1.0, batchsize = Int(round((size(X_expanded, 2)/1))), 
     shuffle = false, rng = StableRNG(1111)))
 
+bics = []
+lambdas = []
+number_of_terms = []
+rss_vec = []
+for λ in exp10.(-3.0:0.2:0.0)
+    println("lambda is $λ")
+    println("\n")
+    opt = STLSQ(λ) # λ < exp10(-1.35) gives error
+    res = solve(problem_regression, basis, opt, options = options)
+    system = get_basis(res);
+    pas = get_parameter_map(system);
+    println(system)
+    println("\n")
+    println("bic is", bic(res))
+    println(res)
 
-opt = STLSQ(exp10.(-3.1:0.05:2.0)) # λ < exp10(-1.35) gives error
-res = solve(problem_regression, basis, opt, options = options)
-system = get_basis(res)
-pas = get_parameter_map(system)
-bic(res)
+    push!(bics, bic(res))
+    push!(lambdas, λ)
+    push!(number_of_terms, size(pas, 1))
+    push!(rss_vec, rss(res))
+end
 
-println(res)
-println(system)
+
+
 fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
 savefig(fig2, "sparse_reg_example.png")
+
+stats_reg = hcat(bics, lambdas, number_of_terms, rss_vec)
+writedlm("sparse_reg_data/stats_lang_improved_kldf.csv", stats_reg ,',')
+
+@which bic(res)
