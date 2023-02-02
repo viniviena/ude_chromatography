@@ -44,21 +44,27 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 5e-2 #Feed flow rate (dm3/min)
-d = 0.5e0  # Column diameter (dm)
-dp = 1.0e-2 # particle diameter (dm)
-L = 2.00e0 # Column length (dm)
+Qf = 1.04*10^-7 #Feed flow rate (dm3/min)
+d = 9.3*10^-3 # Column diameter (dm)
+dp = 1.1e-3*2 # particle diameter (dm)
+L = 0.165 # Column length (dm)
 a = pi * d^2 / 4e0 #Column cross section area (dm2)
-epsilon = 0.5e0 # void fraction
+epsilon = 0.283e0 # void fraction
 u = Qf / (a * epsilon) #dm/min (drif velocity)
-Dax = 0.7e0*0.1089e0*10^-2e0*60.0e0 + 0.5e0*dp*u
+#Dax = 0.00166
+Dax = (0.45 + 0.550*epsilon)*0.1204*10^-4 + dp/2*u
 Pe = u*L/Dax
 
-cin =  5.5e0
-qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
-k_iso = 1.8e0
-#q_test = 25.0*cin^0.6
-q_test = qmax*k_iso*cin^1.0/(1 + k_iso*cin^1.0)
+R_1 = 8.314
+R_2 = R_1/1000
+T = 343
+cin =  0.3815 #(mol/m3)
+p_in = cin*R_2*T
+qmax = 1.757 
+ΔH = 11.46*10^3
+k_iso = 1.81e-2*exp(-ΔH/R_1/T)
+t = 0.356
+q_test = qmax*k_iso*cin/(1 + (k_iso*cin)^t)^1/t
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 

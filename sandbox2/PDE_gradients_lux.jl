@@ -26,7 +26,7 @@ include("utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 40 # Number of finite elements
+n_elements = 60 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -44,20 +44,37 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 5e-2 #Feed flow rate (dm3/min)
-d = 0.5e0  # Column diameter (dm)
-dp = 1.0e-2 # particle diameter (dm)
-L = 2.00e0 # Column length (dm)
-a = pi * d^2 / 4e0 #Column cross section area (dm2)
-epsilon = 0.5e0 # void fraction
-u = Qf / (a * epsilon) #dm/min (drif velocity)
-Dax = 0.7e0*0.1089e0*10^-2e0*60.0e0 + 0.5e0*dp*u
+Qf = 1.66667e-5*1.2 #Feed flow rate (m3/s)
+d = 1.5e-2 # Column diameter (m)
+dp = 1.5e-3*2 # particle diameter (m)
+L = 0.031 # Column length (m)
+a = pi * d^2 / 4e0 #Column cross section area (m2)
+epsilon = 0.58 # void fraction
+u = Qf / (a * epsilon) #m/s (drif velocity)
+L/u
+#u = 2e-4
+#Dax = 0.00166
+Dax = (0.45 + 0.550*epsilon)*0.235*10^-4 + dp/2*u #(m2/s)
+#Dax = 0.00166 
 Pe = u*L/Dax
-cin =  5.5e0
-qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
-k_iso = 1.8e0
-#q_test = 25.0*cin^0.6
-q_test = qmax*k_iso*cin^1.5/(1 + k_iso*cin^1.5)
+
+R_1 = 8.314
+R_2 = R_1/1000
+T = 373
+c_in =  0.3815 #(mol/m3)
+p_in = cin*R_2*T
+qmax = 1.927 
+ΔH = 14.35*10^3
+k_iso = 1.32e-2*exp(ΔH/R_1/T)
+t = 0.325
+ρ_p = 900 # kg/m3
+k_transf = 1.09/epsilon*(u*dp/(7.5e-5))^(0.33)*(7.5e-5)/dp*3/(dp/2)#1/s
+
+q_test = qmax*k_iso^(1/t)*p_in/(1.0 + k_iso*p_in^t)^(1/t)*ρ_p
+
+p = 0.0:2.0:300.0 |> collect
+q = (qmax*(k_iso)^(1/t))*p./(1.0 .+ k_iso*(p.^t)).^(1/t) # mol/kg
+plot(p, q, xticks = 0.0:50.0:200.0)
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
@@ -117,6 +134,8 @@ end =#
 
 y0_cache = ones(Float64, n_variables)
 c0 = 5.00e-3
+p0 = c0*R_2*T
+
 
 function y_initial(y0_cache, c0)
     var0 = y0_cache[:]
@@ -148,7 +167,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso^(1/t)*p0/(1.0 + k_iso*p0^t)^(1/t)*ρ_p
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -204,12 +223,13 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
+   p = c*R_2*T
+   #q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
    #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = interpolator.(c)/q_test
+   q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
-   q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0)/q_test #scaling dependent variables
-   x1x2 =  [q_eq q]'
+   q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0) #scaling dependent variables
+   #x1x2 =  [q_eq q]'
 
    #-------------------------------mass balance -----------------
 
@@ -229,12 +249,14 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #Liquid phase residual
         
-       yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1]) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] - q[2:end - 1])  .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
 
-
+       #(@view nn(x1x2, p, st)[1][2:end - 1])
        #Solid phase residual
 
-       yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
+       yp[ql_idx2:qu_idx2] .= k_transf * (q_eq[1:end] - q[1:end])
+
+       #(@view nn(x1x2, p, st)[1][1:end])
 
        #ex_[i](t)
        #Boundary node equations
@@ -256,7 +278,7 @@ f_node = ODEFunction(rhs, mass_matrix = MM)
 #----- non optimized prob
 y0 = y_initial(y0_cache, c0)
 
-tspan = (0.00e0, 130.00e0) 
+tspan = (0.0, 13000.00e0) 
 
 
 prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
@@ -266,7 +288,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
 @time solution_other = Array(solve(prob_node, FBDF(autodiff = false),
- abstol = 1e-7, reltol = 1e-7, saveat = 2.5e0)); #0.27 seconds after compiling
+ abstol = 1e-7, reltol = 1e-7)); #0.27 seconds after compiling
 
 scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
 plot!(c_exp_data[1:end, 1], solution_other[Int(n_variables/2), :])
