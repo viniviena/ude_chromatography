@@ -26,7 +26,7 @@ include("utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 60 # Number of finite elements
+n_elements = 25 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -44,37 +44,23 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 1.66667e-5*1.2 #Feed flow rate (m3/s)
-d = 1.5e-2 # Column diameter (m)
-dp = 1.5e-3*2 # particle diameter (m)
-L = 0.031 # Column length (m)
-a = pi * d^2 / 4e0 #Column cross section area (m2)
-epsilon = 0.58 # void fraction
-u = Qf / (a * epsilon) #m/s (drif velocity)
-L/u
-#u = 2e-4
-#Dax = 0.00166
-Dax = (0.45 + 0.550*epsilon)*0.235*10^-4 + dp/2*u #(m2/s)
-#Dax = 0.00166 
+#Benzene
+
+Qf = 1.66667e-5*1.2
+dp = 1.5e-3*2
+d = 1.5e-2 
+L = 0.031 
+a = pi*d^2/4
+epsilon = 0.58
+u = Qf / (a * epsilon)
+Dax = 4.2e-4
 Pe = u*L/Dax
+ρ_b = 2.001e-3/(a*L)
+cin = 132e-3
+k_transf = 0.0392*3/(dp/2)
+k_iso  = 40.0
+qmax = 5.89
 
-R_1 = 8.314
-R_2 = R_1/1000
-T = 373
-c_in =  0.3815 #(mol/m3)
-p_in = cin*R_2*T
-qmax = 1.927 
-ΔH = 14.35*10^3
-k_iso = 1.32e-2*exp(ΔH/R_1/T)
-t = 0.325
-ρ_p = 900 # kg/m3
-k_transf = 1.09/epsilon*(u*dp/(7.5e-5))^(0.33)*(7.5e-5)/dp*3/(dp/2)#1/s
-
-q_test = qmax*k_iso^(1/t)*p_in/(1.0 + k_iso*p_in^t)^(1/t)*ρ_p
-
-p = 0.0:2.0:300.0 |> collect
-q = (qmax*(k_iso)^(1/t))*p./(1.0 .+ k_iso*(p.^t)).^(1/t) # mol/kg
-plot(p, q, xticks = 0.0:50.0:200.0)
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
@@ -105,6 +91,7 @@ import Random
 rng = Random.default_rng()
 Random.seed!(rng, 13)
 
+
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
@@ -133,8 +120,7 @@ end =#
 
 
 y0_cache = ones(Float64, n_variables)
-c0 = 5.00e-3
-p0 = c0*R_2*T
+c0 = 0.0
 
 
 function y_initial(y0_cache, c0)
@@ -167,7 +153,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso^(1/t)*p0/(1.0 + k_iso*p0^t)^(1/t)*ρ_p
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0/(1.0 + k_iso*c0)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -223,12 +209,11 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   p = c*R_2*T
-   #q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
+   q_eq  = qmax*k_iso.*c./(1.0 .+ k_iso.*c)
    #q_eq = 25.0*abs.(c).^0.6/q_test
-   q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
+   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
-   q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0) #scaling dependent variables
+   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
    #x1x2 =  [q_eq q]'
 
    #-------------------------------mass balance -----------------
@@ -249,7 +234,7 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #Liquid phase residual
         
-       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] - q[2:end - 1])  .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+       yp[cl_idx:cu_idx] .= - 880 * (1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] - q[2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
        #(@view nn(x1x2, p, st)[1][2:end - 1])
        #Solid phase residual
@@ -260,9 +245,9 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #ex_[i](t)
        #Boundary node equations
-       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .-  c_in)
+       yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in)
 
-       yp[cbu_idx] =  dy_du[cbu_idx] / h
+       yp[cbu_idx] =  dy_du[cbu_idx] / h / L
    end
    nothing
 end
@@ -278,8 +263,7 @@ f_node = ODEFunction(rhs, mass_matrix = MM)
 #----- non optimized prob
 y0 = y_initial(y0_cache, c0)
 
-tspan = (0.0, 13000.00e0) 
-
+tspan = (0.0, 9000) 
 
 prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
 
@@ -287,11 +271,9 @@ LinearAlgebra.BLAS.set_num_threads(1)
 
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
-@time solution_other = Array(solve(prob_node, FBDF(autodiff = false),
- abstol = 1e-7, reltol = 1e-7)); #0.27 seconds after compiling
+@time solution_other = solve(prob_node, FBDF(autodiff = false)); #0.27 seconds after compiling
 
-scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
-plot!(c_exp_data[1:end, 1], solution_other[Int(n_variables/2), :])
+plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
 
 
 #--------- Training Neural Network ----------
