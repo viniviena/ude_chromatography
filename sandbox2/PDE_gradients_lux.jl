@@ -26,7 +26,7 @@ include("utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 25 # Number of finite elements
+n_elements = 35 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -53,7 +53,7 @@ L = 0.031
 a = pi*d^2/4
 epsilon = 0.58
 u = Qf / (a * epsilon)
-Dax = 4.2e-4
+Dax = 4.2e-4*2
 Pe = u*L/Dax
 ρ_b = 2.001e-3/(a*L)
 cin = 132e-3
@@ -265,15 +265,15 @@ y0 = y_initial(y0_cache, c0)
 
 tspan = (0.0, 9000) 
 
-prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
+prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init), initializealg = ShampineCollocationInit())
 
 LinearAlgebra.BLAS.set_num_threads(1)
 
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
-@time solution_other = solve(prob_node, FBDF(autodiff = false)); #0.27 seconds after compiling
+@time solution_other = solve(prob_node, FBDF(autodiff = false), initializealg = ShampineCollocationInit()); #0.27 seconds after compiling
 
-plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
+plot(solution_other.t/(1.6e-1), Array(solution_other)[Int(n_variables/2), :]/cin)
 
 
 #--------- Training Neural Network ----------

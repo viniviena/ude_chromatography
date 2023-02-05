@@ -242,7 +242,9 @@ function make_MM_2(n_elements::Int, n_phases::Int, n_components::Int; p_order = 
             #Liquid phase residual
             MM[cl_idx:cu_idx, cl_idx:cu_idx] = Diagonal(ones(cu_idx - cl_idx + 1))
             #Solid phase residual
-            MM[ql_idx2:qu_idx2, ql_idx2:qu_idx2] = Diagonal(ones(qu_idx2 - ql_idx2 + 1))
+            if n_phases > 1
+                MM[ql_idx2:qu_idx2, ql_idx2:qu_idx2] = Diagonal(ones(qu_idx2 - ql_idx2 + 1))
+            end
         
             j = j + p_order + 2*n_elements - 2
         end
