@@ -13,7 +13,7 @@ using LinearSolve
 # Script with auxiliary functions
 include("utils.jl")
 
-n_elements = 20# Number of finite elements
+n_elements = 20 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 1 #2 phases → 1 liquid + 1 solid

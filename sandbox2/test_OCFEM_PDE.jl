@@ -76,30 +76,28 @@ D = 2e-5
 Pe = h/(2*D)
 L = 2 - (-2)
 
+#Stencil
 rhs = D*y_dy2/(h^2) - y_dy/h
 
+#ODE - inplace
 function ode(dy, y, p, t)
 dy[1] = y[1] - 1/sqrt(1 + 4*D*t)*exp(-(2.0 + t)^2/(1 + 4*D*t))    
 dy[2:end - 1] = @view(rhs[2:end - 1, 1:end])*y
 dy[end] = y[end] - 1/sqrt(1 + 4*D*t)*exp(-(2.0 - t)^2/(1 + 4*D*t))
 end
 
+#Solving
 f_node = ODEFunction(ode, mass_matrix = MM)
-
 tspan = (0.0, 2.0) 
-
 prob_node = ODEProblem(f_node, u₀, tspan, 2)
-
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
-
 @time solution = solve(prob_node, abstol = 1e-6, reltol = 1e-6, FBDF(autodiff = false), saveat = h);
 
+#Plotting
 u_sol = Array(solution)
-
 a_sol = H^-1*u_sol
-
 x_analitcal = -2.0:h:2.0 |> collect
-idx = 181
+idx = 2
 analitcal_sol = @. 1/sqrt(1 + 4*D*solution.t)*exp(-(x_analitcal[idx] - solution.t)^2/(1 + 4*D*solution.t))
 scatter(solution.t, analitcal_sol)
 plot!(solution.t, a_sol[Int(idx*2 - 1), :], linewidth = 2.0)
