@@ -44,14 +44,15 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 5e-2 #Feed flow rate (dm3/min)
-d = 0.5e0  # Column diameter (dm)
-dp = 1.0e-2 # particle diameter (dm)
-L = 2.00e0 # Column length (dm)
+Qf = 1.04*10^-7 #Feed flow rate (dm3/min)
+d = 9.3*10^-3 # Column diameter (dm)
+dp = 1.1e-3*2 # particle diameter (dm)
+L = 0.165 # Column length (dm)
 a = pi * d^2 / 4e0 #Column cross section area (dm2)
-epsilon = 0.5e0 # void fraction
+epsilon = 0.283e0 # void fraction
 u = Qf / (a * epsilon) #dm/min (drif velocity)
-Dax = 0.7e0*0.1089e0*10^-2e0*60.0e0 + 0.5e0*dp*u
+#Dax = 0.00166
+Dax = (0.45 + 0.550*epsilon)*0.1204*10^-4 + dp/2*u
 Pe = u*L/Dax
 
 cin =  5.5e0

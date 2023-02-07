@@ -45,8 +45,8 @@ function make_H(H::AbstractArray)
     h2 = zeros(1,size(H)[2])
     for i = 1:p_order
         if i == 1
-            h1[i] = (1 +2*0)*(1 - 0)^2
-            h2[size(H)[2] - 4 + i] = (1 +2*1)*(1 - 1)^2
+            h1[i] = (1 + 2*0)*(1 - 0)^2
+            h2[size(H)[2] - 4 + i] = (1 + 2*1)*(1 - 1)^2
         elseif i == 2
             h1[i] = 0*(1 - 0)^2*h
             h2[size(H)[2] - 4 + i] = 1*(1 - 1)^2*h
@@ -115,7 +115,7 @@ function make_B(B::AbstractArray)
         for k = 1:collocation_points
             for i = 1:p_order
                 if i == 1
-                    B[k-1 + l, i + 2*j - 2] = 12*U[k]- 6
+                    B[k-1 + l, i + 2*j - 2] = 12*U[k] - 6
                 
                 elseif i == 2
                     B[k-1 + l, i + 2*j - 2] = (6*U[k] - 4)*h
@@ -137,16 +137,16 @@ function make_B(B::AbstractArray)
     
     for i = 1:p_order
         if i == 1
-            b1[i] = 6*0^2 - 6*0
+            b1[i] = 12*0 - 6
             b2[size(B)[2] - 4 + i] = 12*1 - 6
         elseif i == 2
-            b1[i] = (1 - 4*0 + 3*0^2)*h
-            b2[size(B)[2] - 4 + i] = (-4 + 6*1)*h
+            b1[i] = (6*0 - 4)*h
+            b2[size(B)[2] - 4 + i] = (6*1 - 4)*h
         elseif i == 3
-            b1[i] = 6*0 - 6*0^2
+            b1[i] = 6 - 12*0
             b2[size(B)[2] - 4 + i] = 6 - 12*1
         elseif i == 4
-            b1[i] = (3*0^2 - 2*0)*h
+            b1[i] = (6*0 − 2)*h
             b2[size(B)[2] - 4 + i] = (6*1 - 2)*h
         end
     end
@@ -242,7 +242,9 @@ function make_MM_2(n_elements::Int, n_phases::Int, n_components::Int; p_order = 
             #Liquid phase residual
             MM[cl_idx:cu_idx, cl_idx:cu_idx] = Diagonal(ones(cu_idx - cl_idx + 1))
             #Solid phase residual
-            MM[ql_idx2:qu_idx2, ql_idx2:qu_idx2] = Diagonal(ones(qu_idx2 - ql_idx2 + 1))
+            if n_phases > 1
+                MM[ql_idx2:qu_idx2, ql_idx2:qu_idx2] = Diagonal(ones(qu_idx2 - ql_idx2 + 1))
+            end
         
             j = j + p_order + 2*n_elements - 2
         end

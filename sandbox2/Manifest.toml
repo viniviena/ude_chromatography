@@ -2,7 +2,11 @@
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
+<<<<<<< HEAD
 project_hash = "09b82a6119c94c328b9dc8d84393a9dfcc27313d"
+=======
+project_hash = "2e78899326f9e402576d03d952ae8f699a2c4f6f"
+>>>>>>> propane_case
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -861,9 +865,9 @@ version = "0.21.0+0"
 
 [[deps.Ghostscript_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "78e2c69783c9753a91cdae88a8d432be85a2ab5e"
+git-tree-sha1 = "71061d79c8d92172ece80e567c0de45a2bb9d989"
 uuid = "61579ee1-b43e-5ca0-a5da-69d92c66a64b"
-version = "9.55.0+0"
+version = "9.55.0+3"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Pkg", "Zlib_jll"]
