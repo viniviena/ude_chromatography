@@ -26,7 +26,7 @@ include("utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 35 # Number of finite elements
+n_elements = 42 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -44,22 +44,21 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-#Benzene
 
-Qf = 1.66667e-5*1.2
-dp = 1.5e-3*2
-d = 1.5e-2 
-L = 0.031 
+Qf = 5.0e-2
+d = 0.5 
+L = 2.0 
 a = pi*d^2/4
-epsilon = 0.58
-u = Qf / (a * epsilon)
-Dax = 4.2e-4*2
-Pe = u*L/Dax
-ρ_b = 2.001e-3/(a*L)
-cin = 132e-3
-k_transf = 0.0392*3/(dp/2)
-k_iso  = 40.0
-qmax = 5.89
+epsilon = 0.5
+u = Qf/(a*epsilon)
+Pe = 21.095632695978704
+Dax = u*L/Pe
+#ρ_b = 2.001e-3/(a*L)
+cin = 5.5
+k_transf = 0.22
+k_iso  = 1.8
+qmax = 55.54
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
 
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
@@ -73,14 +72,14 @@ end
 end
 
 #Calculating the derivative matrices stencil
-y_dy = round_zeros.(Array(A * H^-1)) # y = H*a and dy_dx = A*a = (A*H-1)*y
-y_dy2 = round_zeros.(Array(B * H^-1)) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
+y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
+y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_improved_quad_sips_25min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_improved_kldf_sips_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -89,14 +88,15 @@ import Random
 # ----- Lux
 
 rng = Random.default_rng()
-Random.seed!(rng, 13)
+Random.seed!(rng, 11)
 
 
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
-  Lux.Dense(2, 22, tanh_fast),
-  Lux.Dense(22, 1)
+  Lux.Dense(2, 9, rbf),
+  Lux.Dense(9, 6, rbf),
+  Lux.Dense(6, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
@@ -120,7 +120,7 @@ end =#
 
 
 y0_cache = ones(Float64, n_variables)
-c0 = 0.0
+c0 = 1e-3
 
 
 function y_initial(y0_cache, c0)
@@ -153,7 +153,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0/(1.0 + k_iso*c0)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -209,12 +209,12 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*c./(1.0 .+ k_iso.*c)
+   q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
    #q_eq = 25.0*abs.(c).^0.6/q_test
    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
-   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
-   #x1x2 =  [q_eq q]'
+   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
+   x1x2 =  [q_eq q]'
 
    #-------------------------------mass balance -----------------
 
@@ -234,12 +234,12 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #Liquid phase residual
         
-       yp[cl_idx:cu_idx] .= - 880 * (1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] - q[2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
+       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
        #(@view nn(x1x2, p, st)[1][2:end - 1])
        #Solid phase residual
 
-       yp[ql_idx2:qu_idx2] .= k_transf * (q_eq[1:end] - q[1:end])
+       yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
        #(@view nn(x1x2, p, st)[1][1:end])
 
@@ -263,17 +263,19 @@ f_node = ODEFunction(rhs, mass_matrix = MM)
 #----- non optimized prob
 y0 = y_initial(y0_cache, c0)
 
-tspan = (0.0, 9000) 
+tspan = (first(c_exp_data[: , 1]), last(c_exp_data[: , 1])) 
 
-prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init), initializealg = ShampineCollocationInit())
+prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
 
 LinearAlgebra.BLAS.set_num_threads(1)
 
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
-@time solution_other = solve(prob_node, FBDF(autodiff = false), initializealg = ShampineCollocationInit()); #0.27 seconds after compiling
+@time solution_other = solve(prob_node, FBDF(autodiff = false),
+ saveat = c_exp_data[2, 1] - c_exp_data[1, 1]); #0.27 seconds after compiling
 
-plot(solution_other.t/(1.6e-1), Array(solution_other)[Int(n_variables/2), :]/cin)
+plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
+scatter!(c_exp_data[:, 1], c_exp_data[:, 2])
 
 
 #--------- Training Neural Network ----------
@@ -313,7 +315,7 @@ weights[is_bt] .= 1.0
 
 # Setting up loss function for using with galactic
 loss(θ) = sum(abs, (data_train .- predict(θ)).*weights)
-predict(θ)
+
 
 #= function regularization(θ)
     #Flux.Losses.mse(_ann1(c0_scaled, θ[1 + 2: 29 + 2]), θ[1])*(1/0.5^2) +
@@ -347,22 +349,22 @@ callback = function(p,l)
     println(l)
     println(iter)
     iter += 1
-    l < 3.5e-1
+    l < 2.0e-1
 end
 
-opt = Flux.Optimiser(RMSProp(0.08), ExpDecay(1.0, 0.975, 30))
+opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.97, 30))
 
-@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 190)
+@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 150)
 
 optf2 = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
 optprob2 = Optimization.OptimizationProblem(optf2, results.u)
 
 @time results_2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm = 0.01), 
-callback = callback, maxiters = 100, maxtime = 20*60, allow_f_increases = false)
+callback = callback, maxiters = 50, maxtime = 20*60, allow_f_increases = false)
 
-aaa = predict(results.u)
+aaa = predict(results_2.u)
 
-loss(results.u)
+loss(results_2.u)
 mae = sqrt(Flux.mse(c_exp_data[2:end, 2], aaa[1:end]*cin))*100
 println("MAE is $mae%")
 
@@ -373,9 +375,8 @@ plot!(0:0.5:6.0, 0:0.5:6.0, label = nothing)
 
 plot(c_exp_data[2:end, 1], c_exp_data[2:end, 2] .- aaa*cin, marker = 'o')
 
-writedlm("best_improved_quad_22neurons_40fe_sips_tanh_25min.csv", results_2.u)
+writedlm("trained_models/best_improved_kldf_20_neurons_42fe_sips_rbf_2min_5e-7.csv", results_2.u)
 
-best_w
 # ------ Plotting Residuals 
 using KernelDensity, Distributions
 error = c_exp_data[2:end, 2] .- aaa*cin
