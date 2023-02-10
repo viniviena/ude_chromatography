@@ -79,7 +79,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_improved_kldf_sips_2min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_kldf_sips_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -94,9 +94,8 @@ Random.seed!(rng, 11)
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
-  Lux.Dense(2, 9, rbf),
-  Lux.Dense(9, 6, rbf),
-  Lux.Dense(6, 1)
+  Lux.Dense(2, 20, tanh_fast),
+  Lux.Dense(20, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
@@ -284,15 +283,14 @@ tsave = c_exp_data[2:end, 1]
 
 function predict(θ)
     # --------------------------Sensealg---------------------------------------------
-    sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
+    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
 
     #----------------------------Problem solution-------------------------------------
     abstol = reltol = 5e-7
-    tspan = (1e-12, maximum(c_exp_data[:, 1])) #TAVA ERRADOOO
+    tspan = (0.0, maximum(c_exp_data[:, 1])) #TAVA ERRADOOO
 
     prob_ = remake(prob_node; p = θ, tspan = tspan)
     
-
     s_new = Array(solve(prob_, FBDF(autodiff = false), abstol = abstol, reltol = reltol,
     saveat = tsave, sensealg = sensealg))
 
@@ -352,15 +350,15 @@ callback = function(p,l)
     l < 2.0e-1
 end
 
-opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.97, 30))
+opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.985, 20))
 
-@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 150)
+@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 190)
 
 optf2 = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
 optprob2 = Optimization.OptimizationProblem(optf2, results.u)
 
 @time results_2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm = 0.01), 
-callback = callback, maxiters = 50, maxtime = 20*60, allow_f_increases = false)
+callback = callback, maxiters = 75, maxtime = 35*60, allow_f_increases = true)
 
 aaa = predict(results_2.u)
 
@@ -369,13 +367,13 @@ mae = sqrt(Flux.mse(c_exp_data[2:end, 2], aaa[1:end]*cin))*100
 println("MAE is $mae%")
 
 scatter(c_exp_data[2:end, 1], c_exp_data[2:end, 2], label = " Experimental ", legend =:bottomright)
-plot!(c_exp_data[2:end, 1], aaa[1:end]*cin, label = "neural UDE", legend=:bottomright, linewidth = 2.)
+plot!(c_exp_data[2:end, 1], aaa[1:end]*cin, label = "neural UDE", legend=:bottomright)
 scatter(c_exp_data[2:end, 2], aaa*cin, label = nothing)
 plot!(0:0.5:6.0, 0:0.5:6.0, label = nothing)
 
 plot(c_exp_data[2:end, 1], c_exp_data[2:end, 2] .- aaa*cin, marker = 'o')
 
-writedlm("trained_models/best_improved_kldf_20_neurons_42fe_sips_rbf_2min_5e-7.csv", results_2.u)
+writedlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7.csv", results_2.u)
 
 # ------ Plotting Residuals 
 using KernelDensity, Distributions

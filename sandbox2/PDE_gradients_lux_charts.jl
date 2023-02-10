@@ -26,7 +26,7 @@ include("utils.jl")
 #----------- Building OCFEM (orthogonal collocation on finite element method)
 #for z discretization with cubic hermite polynomials-------------
 
-n_elements = 40 # Number of finite elements
+n_elements = 42 # Number of finite elements
 collocation_points = 2 #Collocation points
 n_components = 1;  # 2 chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
@@ -44,22 +44,22 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 1.04*10^-7 #Feed flow rate (dm3/min)
-d = 9.3*10^-3 # Column diameter (dm)
-dp = 1.1e-3*2 # particle diameter (dm)
-L = 0.165 # Column length (dm)
-a = pi * d^2 / 4e0 #Column cross section area (dm2)
-epsilon = 0.283e0 # void fraction
-u = Qf / (a * epsilon) #dm/min (drif velocity)
-#Dax = 0.00166
-Dax = (0.45 + 0.550*epsilon)*0.1204*10^-4 + dp/2*u
-Pe = u*L/Dax
 
-cin =  5.5e0
-qmax = 55.54e0 #mg/g_s*g_s/cm3s*1000cm3/dm3 -> #mg/Lparticle
-k_iso = 1.8e0
-#q_test = 25.0*cin^0.6
-q_test = qmax*k_iso*cin^1.5/(1 + k_iso*cin^1.5)
+Qf = 5.0e-2
+d = 0.5 
+L = 2.0 
+a = pi*d^2/4
+epsilon = 0.5
+u = Qf/(a*epsilon)
+Pe = 21.095632695978704
+Dax = u*L/Pe
+#ρ_b = 2.001e-3/(a*L)
+cin = 5.5
+k_transf = 0.22
+k_iso  = 1.8
+qmax = 55.54
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
+
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
 
@@ -72,15 +72,14 @@ end
 end
 
 #Calculating the derivative matrices stencil
-y_dy = round_zeros.(Array(A * H^-1)) # y = H*a and dy_dx = A*a = (A*H-1)*y
-y_dy2 = round_zeros.(Array(B * H^-1)) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
-
+y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
+y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_improved_quad_sips_1min.csv", ',', Float64) # solid phase concentration measurements
+c_exp_data = readdlm("train_data/traindata_kldf_sips_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -89,14 +88,18 @@ import Random
 # ----- Lux
 
 rng = Random.default_rng()
-Random.seed!(rng, 2)
+Random.seed!(rng, 11)
+
+
+rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
-  Lux.Dense(2, 17, tanh_fast),
-  Lux.Dense(17, 1)
+  Lux.Dense(2, 20, tanh_fast),
+  Lux.Dense(20, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
+
 
 #--------------Flux
 #= ann_node1 = FastChain(FastDense(2, 15, tanh), FastDense(15, 1)); #ANNₑ,₁
@@ -112,16 +115,15 @@ function my_nn(u, p)
     (w2 * (tanh.(w1 * u .+ b1*0.0) .+ b2*0.0))
 end =#
 
+# ----- Building the actual PDE model--------
+
 
 y0_cache = ones(Float64, n_variables)
-c0 = 5.00e-3
+c0 = 1e-3
+
 
 function y_initial(y0_cache, c0)
-
-    #var0 = get_tmp(y0_cache, p)
-    #c0 = get_tmp(c0, p)
     var0 = y0_cache[:]
-    
 
     begin
     j = 0
@@ -163,8 +165,6 @@ function y_initial(y0_cache, c0)
 end
 
 
-#----------- interpolation exogeneous ------
-
 y0 =  y_initial(y0_cache, c0)
 
 
@@ -189,6 +189,7 @@ end
 #using TimerOutputs
 using UnPack
 
+
 dy_du = dy2_du = ones(Float64, n_variables)
 
 
@@ -207,11 +208,11 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
+   q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
    #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = interpolator.(c)/q_test
+   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
-   q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0)/q_test #scaling dependent variables
+   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
    x1x2 =  [q_eq q]'
 
    #-------------------------------mass balance -----------------
@@ -232,18 +233,20 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #Liquid phase residual
         
-       yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1]) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
-
+       #(@view nn(x1x2, p, st)[1][2:end - 1])
        #Solid phase residual
 
        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
+       #(@view nn(x1x2, p, st)[1][1:end])
+
        #ex_[i](t)
        #Boundary node equations
-       yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .-  c_in)
+       yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in)
 
-       yp[cbu_idx] =  dy_du[cbu_idx] / h
+       yp[cbu_idx] =  dy_du[cbu_idx] / h / L
    end
    nothing
 end
@@ -259,19 +262,19 @@ f_node = ODEFunction(rhs, mass_matrix = MM)
 #----- non optimized prob
 y0 = y_initial(y0_cache, c0)
 
-tspan = (0.00e0, 130.00e0) 
+tspan = (first(c_exp_data[: , 1]), last(c_exp_data[: , 1])) 
 
 prob_node = ODEProblem(f_node, y0, tspan, Lux.ComponentArray(p_init))
 
-
-#using MKL
-#using .BLAS
 LinearAlgebra.BLAS.set_num_threads(1)
-#Threads.nthreads()
+
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
-@time solution_other = Array(solve(prob_node, FBDF(autodiff = false),
- abstol = 1e-7, reltol = 1e-7, saveat = 1.0e0)); #0.27 seconds after compiling
+@time solution_other = solve(prob_node, FBDF(autodiff = false),
+ saveat = c_exp_data[2, 1] - c_exp_data[1, 1]); #0.27 seconds after compiling
+
+plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
+scatter!(c_exp_data[:, 1], c_exp_data[:, 2])
 
 
 #--------- Training Neural Network ----------
@@ -281,19 +284,17 @@ tsave = c_exp_data[2:end, 1]
 function predict(θ)
     # --------------------------Sensealg---------------------------------------------
     sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
-    #sensealg = ForwardDiffSensitivity()
+
     #----------------------------Problem solution-------------------------------------
     abstol = reltol = 1e-6
-    tspan = (1e-12, maximum(c_exp_data[:, 1])) #TAVA ERRADOOO
+    tspan = (0.0, maximum(c_exp_data[:, 1])) #TAVA ERRADOOO
 
     prob_ = remake(prob_node; p = θ, tspan = tspan)
-    #prob_ = remake(prob_odae; p = θ)
+    
 
     s_new = Array(solve(prob_, FBDF(autodiff = false), abstol = abstol, reltol = reltol,
     saveat = tsave, sensealg = sensealg))
 
-    #s_new = solve(prob_, QNDF(autodiff = false), abstol = abstol, reltol = reltol,
-    #saveat = 0.5, tstops = [0.0, 100.0], sensealg = sensealg)
 
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
@@ -313,7 +314,7 @@ weights[is_bt] .= 1.0
 
 # Setting up loss function for using with galactic
 loss(θ) = sum(abs, (data_train .- predict(θ)).*weights)
-predict(θ)
+
 
 #= function regularization(θ)
     #Flux.Losses.mse(_ann1(c0_scaled, θ[1 + 2: 29 + 2]), θ[1])*(1/0.5^2) +
@@ -324,16 +325,68 @@ end =#
 # ..................testing gradients
 θ = copy(Lux.ComponentArray(p_init))
 
-
-
 using ReverseDiff
 
 @time loss(θ)
 @time predict(θ)
 @time regularization(θ)
-#@time grad_forward = ForwardDiff.gradient(loss, θ)
 @time grad_reverse = ReverseDiff.gradient(loss, θ)
 @time grad_regularization = Zygote.gradient(regularization, θ)[1]
+
+
+#------- MAP estimation
+using Optimization
+
+#adtype = Optimization.AutoReverseDiff(true)
+adtype = Optimization.AutoZygote()
+optf = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
+optprob = Optimization.OptimizationProblem(optf, θ)
+
+iter = 1
+callback = function(p,l)
+    global iter 
+    println(l)
+    println(iter)
+    iter += 1
+    l < 2.0e-1
+end
+
+opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.985, 20))
+
+@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 150)
+
+optf2 = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
+optprob2 = Optimization.OptimizationProblem(optf2, results.u)
+
+@time results_2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm = 0.01), 
+callback = callback, maxiters = 75, maxtime = 20*60, allow_f_increases = false)
+
+aaa = predict(results.u)
+
+loss(results.u)
+mae = sqrt(Flux.mse(c_exp_data[2:end, 2], aaa[1:end]*cin))*100
+println("MAE is $mae%")
+
+scatter(c_exp_data[2:end, 1], c_exp_data[2:end, 2], label = " Experimental ", legend =:bottomright)
+plot!(c_exp_data[2:end, 1], aaa[1:end]*cin, label = "neural UDE", legend=:bottomright)
+scatter(c_exp_data[2:end, 2], aaa*cin, label = nothing)
+plot!(0:0.5:6.0, 0:0.5:6.0, label = nothing)
+
+plot(c_exp_data[2:end, 1], c_exp_data[2:end, 2] .- aaa*cin, marker = 'o')
+
+writedlm("trained_models/best_improved_kldf_20_neurons_42fe_sips_tanh_2min_1e-6.csv", results.u)
+
+# ------ Plotting Residuals 
+using KernelDensity, Distributions
+error = c_exp_data[2:end, 2] .- aaa*cin
+error_mean = mean(c_exp_data[2:end, 2] .- aaa*cin)
+error_std = std(c_exp_data[2:end, 2] .- aaa*cin)
+gauss = Distributions.Normal(error_mean, error_std)
+samples_gauss = Distributions.pdf.(gauss, -0.2:0.001:0.2)
+kde_samples = KernelDensity.kde(error)
+plot(collect(kde_samples.x), kde_samples.density)
+plot!(-0.2:0.001:0.2, samples_gauss)
+plot!([error_mean], seriestype="vline")
 
 
 
@@ -341,22 +394,29 @@ using ReverseDiff
 
 #----model loading
 using DelimitedFiles
-best_p = Float64.(readdlm("trained_models/best_improved_quad_17neurons_35fe_sips_scaled_tanh_1min.csv"))
+best_p = Float64.(readdlm("trained_models/best_kldf_20_neurons_42fe_sips_tanh_2min_1e-6.csv"))
 best_w = deepcopy((Lux.ComponentArray(p_init)))
 #best_w = deepcopy(results_2.u)
-neurons = 17
+neurons = 20
 best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
 best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1)
 
+#= best_w.layer_1.weight  .= reshape(best_p[1:20], 10, 2)
+best_w.layer_1.bias .= reshape(best_p[21:21 + 9], 10, 1)
+best_w.layer_2.weight .= reshape(best_p[21 + 9 + 1: 21 + 9 + 1 + 10*8 - 1], 8, 10)
+best_w.layer_2.bias .= reshape(best_p[21 + 9 + 1 + 10*8: 21 + 9 + 1 + 10*8 + 7], 8, 1)
+best_w.layer_3.weight .= reshape(best_p[21 + 9 + 1 + 10*8 + 7 + 1: 21 + 9 + 1 + 10*8 + 7 + 1 + 7], 1, 8)
+best_w.layer_3.bias .= reshape(best_p[21 + 9 + 1 + 10*8 + 7 + 1 + 7 + 1:end], 1, 1)
+ =#
 
-y0 = y_initial(y0_cache, 5e-3)
-prob_node22 = ODEProblem(f_node, y0, (0.0, 130.0), Lux.ComponentArray(best_w))
+y0 = y_initial(y0_cache, 1e-3)
+prob_node22 = ODEProblem(f_node, y0, (0.0, 110.0), Lux.ComponentArray(best_w))
 
 saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_data[:, 1])
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false),
- abstol = 1e-7, reltol = 1e-7, saveat = saveats); #0.27 seconds after compiling
+ abstol = 1e-6, reltol = 1e-6, saveat = saveats); #0.27 seconds after compiling
 
 plot(solution_optim.t, Array(solution_optim)[Int(n_variables/2), :])
 
@@ -368,13 +428,13 @@ qeq_ = qmax*k_iso.*c_.^1.50./(1 .+ k_iso.*c_.^1.50)./q_test
 q_ = Array(solution_optim)[Int(n_variables), 1:end]./q_test
 
 learned_kinetics = nn([qeq_ q_]', best_w, st)[1]
-plot(solution_optim.t[1:end], learned_kinetics[:])
+PGFPlots.plot(solution_optim.t[1:end], learned_kinetics[:])
 
-true_dqdt = readdlm("test_data/true_dqdt_improved_quad_sips_1min.csv", ',')
+true_dqdt = readdlm("test_data/true_dqdt_kldf_sips_2min.csv", ',')
 
 
 #----------------Desorption and extrapolation
-mutable struct col_model_node_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
+mutable struct col_model_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
     n_variables::T1
     n_elements::T2
     p_order::T3
@@ -397,123 +457,118 @@ using UnPack
 dy_du = dy2_du = ones(Float64, n_variables)
     
     
-function (f::col_model_node_test)(yp, y, p, t)
-    #Aliasing parameters
+function (f::col_model_test)(yp, y, p, t)
+   #Aliasing parameters
 
-    @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
-    Pe, epsilon, c_in, dy_du, dy2_du  = f 
-    
-    
-    dy_du =  y_dy*y
-    dy2_du = y_dy2*y
+   @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
+   Pe, epsilon, c_in, dy_du, dy2_du  = f 
+   
+   
+   dy_du =  y_dy*y
+   dy2_du = y_dy2*y
 
-    
-    j = 0
-    #---------------------Mass Transfer and equilibrium -----------------
+   
+   j = 0
+   #---------------------Mass Transfer and equilibrium -----------------
 
-    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-    #q_eq  = qmax*k_iso*c./(1.0 .+ k_iso.*c)/q_test
-    #q_eq = 25.0*abs.(c).^0.6/q_test
-    q_eq  = qmax*k_iso*abs.(c).^1.50./(1.0 .+ k_iso.*abs.(c).^1.50)/q_test
+   c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
+   q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
+   #q_eq = 25.0*abs.(c).^0.6/q_test
+   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
-    q = ((@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) .- 0.0)./q_test #scaling dependent variables
-    x1x2 =  [q_eq q]'
+   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
+   x1x2 =  [q_eq q]'
 
-    #-------------------------------mass balance -----------------
+   #-------------------------------mass balance -----------------
 
-    begin
-        #Internal node equations
-        cl_idx = 2 + j
-        cu_idx = p_order + 2 * n_elements - 3 + j
+   begin
+       #Internal node equations
+       cl_idx = 2 + j
+       cu_idx = p_order + 2 * n_elements - 3 + j
 
-        ql_idx = 1 * (p_order + 2 * n_elements - 2) + 2 + j
-        qu_idx = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j
+       ql_idx = 1 * (p_order + 2 * n_elements - 2) + 2 + j
+       qu_idx = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j
 
-        ql_idx2 = 1 * (p_order + 2 * n_elements - 2) + 2 + j - 1
-        qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
+       ql_idx2 = 1 * (p_order + 2 * n_elements - 2) + 2 + j - 1
+       qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
-        cbl_idx = j + 1
-        cbu_idx = j + p_order + 2 * n_elements - 2
+       cbl_idx = j + 1
+       cbu_idx = j + p_order + 2 * n_elements - 2
 
-        #Liquid phase residual
+       #Liquid phase residual
         
-        yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * (@view nn(x1x2, p, st)[1][2:end - 1]) .- (@view dy_du[cl_idx:cu_idx]) / h / (L / u) .+ 1 / Pe * (@view dy2_du[cl_idx:cu_idx]) / (h^2) / (L / u)
+       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
+       #(@view nn(x1x2, p, st)[1][2:end - 1])
+       #Solid phase residual
 
-        #Solid phase residual
+       yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
-        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
+       #(@view nn(x1x2, p, st)[1][1:end])
 
+       #ex_[i](t)
+       #Boundary node equations
+       yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in(t))
 
-        #yp[ql_idx2:qu_idx2] .= uptake_reg(q_eq, q)
-
-
-
-        #Boundary node equations
-        yp[cbl_idx] = dy_du[cbl_idx] / h .- Pe * (y[cbl_idx] .-  c_in(t))
-
-        yp[cbu_idx] =  dy_du[cbu_idx] / h
-    end
-    nothing
+       yp[cbu_idx] =  dy_du[cbu_idx] / h / L
+   end
+   nothing
 end
 
 using DataInterpolations
 
+t_interp_lang = [0.0:0.1:110.0; 110.0000001; 120.00:5.:250.0; 250.0000001; 260.0:5.0:500.]
+c_interp_lang = [fill(5.5, size(0.0:0.1:110., 1)); 3.58; fill(3.58, size(120.00:5.:250., 1)); 7.33;
+ fill(7.33, size(260.0:5.0:500., 1))]
 
+t_interp_sips = [0.0:0.1:110.0; 110.0000001; 120.00:5.:250.0; 250.0000001; 260.0:5.0:500.]
+c_interp_sips = [fill(5.5, size(0.0:0.1:110., 1)); 0.75; fill(0.75, size(120.00:5.:250., 1)); 9.33;
+ fill(9.33, size(260.0:5.0:500., 1))]
 
-#= t_interp = [0.0:5.0:130.0; 130.0000001; 160.00:5.:250.0; 250.0000001; 270.0:5.0:400.]
-c_interp = [fill(5.50, size(0.0:5.0:130.0, 1)); 3.5851; fill(3.5851, size(160.00:5.:250.0, 1)); 7.33;
- fill(7.33, size(270.0:5.0:400.0, 1))] =#
+scatter(t_interp_lang, c_interp_lang)
+c_in_t = LinearInterpolation(c_interp_sips, t_interp_sips)
 
-t_interp = [0.0:0.1:130.; 130.0000001; 140.00:5.:250.; 250.0000001; 260.0:5.0:500.]
-c_interp = [fill(5.5, size(0.0:0.1:130., 1)); 0.75; fill(0.75, size(140.00:5.:250., 1)); 9.33;
-fill(9.33, size(260.0:5.0:500., 1))]
-
-c_in_t = LinearInterpolation(c_interp, t_interp)
-
-rhs_test = col_model_node_test(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
+rhs_test = col_model_test(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
 Pe, epsilon, c_in_t, dy_du, dy2_du);
 f_node_test = ODEFunction(rhs_test, mass_matrix = MM)
-y0 = y_initial(y0_cache, 5.0e-3)
-tspan_test = (0.0, 400.00e0) 
-#tspan_test = (0.0, 1e0)
-prob_node_test = ODEProblem(f_node_test, y0, tspan_test, best_w)
+y0 = y_initial(y0_cache, 1e-3)
+tspan_test = (0.00e0, 400.00e0)
 
+prob_node_test = ODEProblem(f_node_test, y0, tspan_test, Lux.ComponentArray(best_w)) 
+solution_test = solve(prob_node_test, FBDF(autodiff = false), 
+abstol = 1e-7, reltol = 1e-7, tstops = [0.0, 110., 250.], saveat = 2.0e0);
 
-test_rate = 1.0
-@time solution_test = Array(solve(prob_node_test, FBDF(autodiff = false), 
-abstol = 1e-7, reltol = 1e-7, saveat = test_rate,  tstops = [0.0, 130., 250])); #0.27 seconds after compiling
-
-test_data = readdlm("test_data/testdata_improved_quad_sips_1min.csv", ',')
+test_data = readdlm("test_data/testdata_kldf_sips_2min.csv", ',')
+test_rate = c_exp_data[2, 1] - c_exp_data[1, 1]
 
 using PGFPlots
 
 history = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
-push!(history, Axis([Plots.Linear(0.0:test_rate:130.0 |> collect, solution_test[Int(n_variables/2), 1:size(c_exp_data, 1)], mark = "none", style = "blue", legendentry = "UDE prediction - Train"),
+push!(history, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution_test[Int(n_variables/2), 1:size(c_exp_data, 1)], mark = "none", style = "blue", legendentry = "UDE prediction - Train"),
             Plots.Linear(c_exp_data[1:end, 1], c_exp_data[1:end, 2], onlyMarks=true, style = "blue, mark = *, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "Observations - Train"),  
-            Plots.Linear(130.0 + test_rate:400 |> collect, solution_test[Int(n_variables/2), size(c_exp_data, 1) + 1:end], mark = "none", style = "red!60, dashed", legendentry = "UDE prediction - Test"),
-            Plots.Linear(test_data[size(c_exp_data, 1):end, 1], test_data[size(c_exp_data, 1):end, 2],onlyMarks=true, style = "red!60, mark = square*, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "Observations - Test"),
-            Plots.Linear([130., 130.], [0., 10.5], mark = "none", style = "black"),
+            Plots.Linear(110.0 + test_rate:test_rate:400 |> collect, solution_test[Int(n_variables/2), size(c_exp_data, 1) + 1:end], mark = "none", style = "red!60, dashed", legendentry = "UDE prediction - Test"),
+            Plots.Linear(test_data[size(c_exp_data, 1) + 1:end, 1], test_data[size(c_exp_data, 1) + 1:end, 2],onlyMarks=true, style = "red!60, mark = square*, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "Observations - Test"),
+            Plots.Linear([110., 110.], [0., 10.5], mark = "none", style = "black"),
             Plots.Node("Train data", 30, 7, style = "blue"),
             Plots.Node("Test data", 210, 7, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {0, 2, 4, 6, 8, 10}, xtick = {0, 40, 80,...,400}, legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = 0, ymax = 10, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
+       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - LDF"))
 
-save("plots/improved_quad_sips_history.pdf", history)       
+save("plots/kldf_sips_history.pdf", history)       
 
 
 history_error = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
-push!(history_error, Axis([Plots.Linear(0.0:test_rate:130.0 |> collect, solution_test[Int(n_variables/2), 1:size(c_exp_data, 1)] .- c_exp_data[1:end, 2], mark = "none", style = "blue", legendentry = "Prediction error - Train"),  
-            Plots.Linear(130.0 + test_rate:400 |> collect, solution_test[Int(n_variables/2), size(c_exp_data, 1) + 1:end] .- test_data[size(c_exp_data, 1):end, 2], mark = "none", style = "red!60, dashed", legendentry = "Prediction error - Test"),
-            Plots.Linear([130., 130.], [-0.5, 0.5], mark = "none", style = "black"),
+push!(history_error, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution_test[Int(n_variables/2), 1:size(c_exp_data, 1)] .- c_exp_data[1:end, 2], mark = "none", style = "blue", legendentry = "Prediction error - Train"),  
+            Plots.Linear(110.0 + test_rate:test_rate:400 |> collect, solution_test[Int(n_variables/2), size(c_exp_data, 1) + 1:end] .- test_data[size(c_exp_data, 1) + 1:end, 2], mark = "none", style = "red!60, dashed", legendentry = "Prediction error - Test"),
+            Plots.Linear([110., 110.], [-0.5, 0.5], mark = "none", style = "black"),
             Plots.Node("Train data", 30, 0.25, style = "blue"),
             Plots.Node("Test data", 210, 0.25, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {-0.4,-0.2, 0.0, 0.2, 0.4}, xtick = {0, 40, 80,...,400},  legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = -0.4, ymax = 0.4, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
+       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - LDF"))
 
-save("plots/improved_quad_sips_history_error.pdf", history_error)
+save("plots/kldf_sips_history_error.pdf", history_error)
 
 
 
@@ -556,8 +611,8 @@ uptake = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2
 push!(uptake, Axis([Plots.Linear(solution_optim.t[1:end], learned_kinetics[1:end], mark = "none", style = "blue", legendentry = "ANN prediction"),
             Plots.Linear(true_dqdt[1:end, 1], true_dqdt[1:end, 2], onlyMarks=true, style = "blue, mark = *, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "True uptake rate (train)"),
 ],
-        legendPos="north east", style = "grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120}", xmin = 0, xmax = 120, ymin = 0, ymax = 7, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
+        legendPos="north east", style = "grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120}", xmin = 0, xmax = 110, ymin = 0, ymax = 7, width = "14cm", height = "6cm", xlabel = "time [min]",
+       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - LDF"))
 
 
-save("plots/uptake_improved_quad_sips.pdf", uptake)
+save("plots/uptake_kldf_sips.pdf", uptake)
