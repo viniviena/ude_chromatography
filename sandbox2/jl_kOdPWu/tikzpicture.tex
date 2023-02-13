@@ -1,0 +1,50 @@
+\documentclass[tikz]{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=newest}
+\pgfplotsset{every axis legend/.append style={%
+cells={anchor=west}}
+}
+\usetikzlibrary{arrows}
+\tikzset{>=stealth'}
+\usepgfplotslibrary{groupplots}
+\begin{document}
+\begin{tikzpicture}[]
+\begin{groupplot}[group style={horizontal sep = 2.75cm, vertical sep = 2.0cm, group size=1 by 1}]
+
+\nextgroupplot [
+  legend pos = {north east},
+  ylabel = {$\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]$},
+  title = {Sips isotherm - Vermeulen's},
+  xmin = {0},
+  xmax = {110},
+  ymax = {7},
+  xlabel = {time [min]},
+  grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120},
+  ymin = {0}
+]
+
+\addplot+[
+  mark = {none},
+  blue
+] coordinates {
+  (-13432.623629623957, 0.01)
+  (-13432.623629623957, 0.012589254117941675)
+  (-12500.476823533085, 0.015848931924611134)
+  (-12500.476823533085, 0.0199526231496888)
+  (-12342.047226670269, 0.025118864315095794)
+  (-12342.047226670269, 0.03162277660168379)
+  (-11651.608589795616, 0.039810717055349734)
+  (-5472.092581830539, 0.05011872336272722)
+  (-5472.092581830539, 0.06309573444801933)
+  (-5472.092581830539, 0.07943282347242814)
+  (376.1058965581468, 0.1)
+  (376.1058965581468, 0.12589254117941673)
+};
+\addlegendentry{{}{ANN prediction}}
+
+
+\end{groupplot}
+
+\end{tikzpicture}
+
+\end{document}

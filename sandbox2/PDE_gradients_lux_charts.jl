@@ -79,7 +79,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_kldf_sips_2min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -94,9 +94,11 @@ Random.seed!(rng, 11)
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
-  Lux.Dense(2, 20, tanh_fast),
-  Lux.Dense(20, 1)
+  Lux.Dense(2, 10, tanh_fast),
+  Lux.Dense(10, 8, tanh_fast),
+  Lux.Dense(8, 1)
 )
+
 
 p_init, st = Lux.setup(rng, nn)
 
@@ -394,22 +396,22 @@ plot!([error_mean], seriestype="vline")
 
 #----model loading
 using DelimitedFiles
-best_p = Float64.(readdlm("trained_models/best_kldf_20_neurons_42fe_sips_tanh_2min_1e-6.csv"))
+best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7.csv"))
 best_w = deepcopy((Lux.ComponentArray(p_init)))
 #best_w = deepcopy(results_2.u)
-neurons = 20
+#= neurons = 20
 best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
-best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1)
+best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1) =#
 
-#= best_w.layer_1.weight  .= reshape(best_p[1:20], 10, 2)
+best_w.layer_1.weight  .= reshape(best_p[1:20], 10, 2)
 best_w.layer_1.bias .= reshape(best_p[21:21 + 9], 10, 1)
 best_w.layer_2.weight .= reshape(best_p[21 + 9 + 1: 21 + 9 + 1 + 10*8 - 1], 8, 10)
 best_w.layer_2.bias .= reshape(best_p[21 + 9 + 1 + 10*8: 21 + 9 + 1 + 10*8 + 7], 8, 1)
 best_w.layer_3.weight .= reshape(best_p[21 + 9 + 1 + 10*8 + 7 + 1: 21 + 9 + 1 + 10*8 + 7 + 1 + 7], 1, 8)
 best_w.layer_3.bias .= reshape(best_p[21 + 9 + 1 + 10*8 + 7 + 1 + 7 + 1:end], 1, 1)
- =#
+
 
 y0 = y_initial(y0_cache, 1e-3)
 prob_node22 = ODEProblem(f_node, y0, (0.0, 110.0), Lux.ComponentArray(best_w))
@@ -430,7 +432,7 @@ q_ = Array(solution_optim)[Int(n_variables), 1:end]./q_test
 learned_kinetics = nn([qeq_ q_]', best_w, st)[1]
 PGFPlots.plot(solution_optim.t[1:end], learned_kinetics[:])
 
-true_dqdt = readdlm("test_data/true_dqdt_kldf_sips_2min.csv", ',')
+true_dqdt = readdlm("test_data/true_dqdt_improved_quad_sips_2min.csv", ',')
 
 
 #----------------Desorption and extrapolation
@@ -536,9 +538,9 @@ tspan_test = (0.00e0, 400.00e0)
 
 prob_node_test = ODEProblem(f_node_test, y0, tspan_test, Lux.ComponentArray(best_w)) 
 solution_test = solve(prob_node_test, FBDF(autodiff = false), 
-abstol = 1e-7, reltol = 1e-7, tstops = [0.0, 110., 250.], saveat = 2.0e0);
+abstol = 1e-6, reltol = 1e-6, tstops = [0.0, 110., 250.], saveat = 2.0e0);
 
-test_data = readdlm("test_data/testdata_kldf_sips_2min.csv", ',')
+test_data = readdlm("test_data/testdata_improved_quad_sips_2min.csv", ',')
 test_rate = c_exp_data[2, 1] - c_exp_data[1, 1]
 
 using PGFPlots
@@ -553,9 +555,9 @@ push!(history, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution_test[
             Plots.Node("Test data", 210, 7, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {0, 2, 4, 6, 8, 10}, xtick = {0, 40, 80,...,400}, legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = 0, ymax = 10, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - LDF"))
+       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/kldf_sips_history.pdf", history)       
+save("plots/improved_quad_sips_history.pdf", history)       
 
 
 history_error = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
@@ -566,9 +568,9 @@ push!(history_error, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution
             Plots.Node("Test data", 210, 0.25, style = "red!60")
 ],
         legendPos="south east", style = "grid = both, ytick = {-0.4,-0.2, 0.0, 0.2, 0.4}, xtick = {0, 40, 80,...,400},  legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = -0.4, ymax = 0.4, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - LDF"))
+       ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/kldf_sips_history_error.pdf", history_error)
+save("plots/improved_quad_sips_history_error.pdf", history_error)
 
 
 
@@ -612,7 +614,7 @@ push!(uptake, Axis([Plots.Linear(solution_optim.t[1:end], learned_kinetics[1:end
             Plots.Linear(true_dqdt[1:end, 1], true_dqdt[1:end, 2], onlyMarks=true, style = "blue, mark = *, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "True uptake rate (train)"),
 ],
         legendPos="north east", style = "grid = both, ytick = {0, 1,...,7}, xtick = {0, 10, 20, ..., 120}", xmin = 0, xmax = 110, ymin = 0, ymax = 7, width = "14cm", height = "6cm", xlabel = "time [min]",
-       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - LDF"))
+       ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
 
-save("plots/uptake_kldf_sips.pdf", uptake)
+save("plots/uptake_improved_quad_sips.pdf", uptake)

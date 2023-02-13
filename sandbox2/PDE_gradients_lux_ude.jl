@@ -79,7 +79,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_kldf_sips_2min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -94,8 +94,9 @@ Random.seed!(rng, 11)
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
-  Lux.Dense(2, 20, tanh_fast),
-  Lux.Dense(20, 1)
+  Lux.Dense(2, 10, tanh_fast),
+  Lux.Dense(10, 8, tanh_fast),
+  Lux.Dense(8, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
@@ -352,7 +353,7 @@ end
 
 opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.985, 20))
 
-@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 190)
+@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 170)
 
 optf2 = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
 optprob2 = Optimization.OptimizationProblem(optf2, results.u)
@@ -373,7 +374,7 @@ plot!(0:0.5:6.0, 0:0.5:6.0, label = nothing)
 
 plot(c_exp_data[2:end, 1], c_exp_data[2:end, 2] .- aaa*cin, marker = 'o')
 
-writedlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7.csv", results_2.u)
+writedlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7.csv", results_2.u)
 
 # ------ Plotting Residuals 
 using KernelDensity, Distributions
