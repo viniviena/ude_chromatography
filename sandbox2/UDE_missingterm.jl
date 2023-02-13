@@ -110,7 +110,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 
 y0_cache = ones(Float64, n_variables)
-c0 = 0.0
+c0 = 1e-3
 
 
 function y_initial(y0_cache, c0)
@@ -254,7 +254,7 @@ saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_dat
 
 #Solving UDE Problem
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), 
-saveat = saveats, abstol = 1e-7, reltol = 1e-7); #0.27 seconds after compiling
+saveat = saveats, abstol = 1e-6, reltol = 1e-6); #0.27 seconds after compiling
 
 #Veryfing UDE fitting quality
 scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
@@ -267,7 +267,8 @@ q_vec = []
 U_vec = []
 lower = 30 
 upper = size(solution_optim.t, 1) - 100
-for i in 10:10:10
+for i in 10:1:10
+    println(i)
     c_ = solution_optim[Int(n_variables/2) - i, lower:upper]
     qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
     push!(q_eq_vec, qeq_)
@@ -282,7 +283,8 @@ U_vec = transpose(mapreduce(permutedims, vcat, U_vec))
 q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
 q_vec = mapreduce(permutedims, hcat, q_vec)
 
-
+y_linear = log.(1.00008 .- (q_vec./q_eq_vec).^2)
+plot(saveats[lower:upper], - y_linear[:])
 
 # Finding missing term with sparse regression
 #Expected missing term is: 0.11*z[1]^2*z[2]^-1 - 0.11*z[2] 
@@ -337,14 +339,14 @@ options = DataDrivenCommonOptions(
     maxiters = 15_000, normalize = DataNormalization(),
     selector = bic, digits = 5,
     data_processing = DataProcessing(split = 1.0, batchsize = Int(round((size(X_expanded, 2)/1))), 
-    shuffle = false, rng = StableRNG(1111)))
+    shuffle = true, rng = StableRNG(1111)))
 
 bics = []
 lambdas = []
 number_of_terms = []
 rss_vec = []
 
-for λ in exp10.(-2.0:0.1:0.0)
+for λ in exp10.(-2.0:0.05:0.0)
     println("lambda is $λ")
     println("\n")
     opt = STLSQ(λ) # λ < exp10(-1.35) gives error
@@ -363,7 +365,7 @@ for λ in exp10.(-2.0:0.1:0.0)
 end
 
 λ = exp10.(-3.0:0.05:0.0)
-λ = 0.0398107
+#λ = 0.0398107
 opt = STLSQ(λ) # λ < exp10(-1.35) gives error
 res = solve(problem_regression, basis, opt, options = options)
 println(res)
