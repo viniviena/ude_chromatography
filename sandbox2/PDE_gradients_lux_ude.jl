@@ -58,7 +58,7 @@ cin = 5.5
 k_transf = 0.22
 k_iso  = 1.8
 qmax = 55.54
-q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
+q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0)
 
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
@@ -79,7 +79,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 #--------Importing experimental data---------------
 using DataInterpolations
 
-c_exp_data = readdlm("train_data/traindata_improved_quad_sips_2min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_improved_quad_lang_2min.csv", ',', Float64)
 
 
 # -----Initializing Neural networks---------
@@ -88,7 +88,7 @@ import Random
 # ----- Lux
 
 rng = Random.default_rng()
-Random.seed!(rng, 11)
+Random.seed!(rng, 2)
 
 
 rbf(x) = exp.(-(x.^2))
@@ -98,6 +98,11 @@ nn = Lux.Chain(
   Lux.Dense(10, 8, tanh_fast),
   Lux.Dense(8, 1)
 )
+
+#= nn = Lux.Chain(
+  Lux.Dense(2, 22, tanh_fast),
+  Lux.Dense(22, 1)
+) =#
 
 p_init, st = Lux.setup(rng, nn)
 
@@ -153,7 +158,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -209,7 +214,7 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
+   q_eq  = qmax*k_iso.*c.^1.0./(1.0 .+ k_iso.*c.^1.0)/q_test
    #q_eq = 25.0*abs.(c).^0.6/q_test
    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
@@ -295,7 +300,6 @@ function predict(θ)
     s_new = Array(solve(prob_, FBDF(autodiff = false), abstol = abstol, reltol = reltol,
     saveat = tsave, sensealg = sensealg))
 
-
     #----------------------------Output---------------------------------------------
     # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
@@ -313,7 +317,7 @@ weights = ones(size(data_train))
 weights[is_bt] .= 1.0
 
 # Setting up loss function for using with galactic
-loss(θ) = sum(abs, (data_train .- predict(θ)).*weights)
+loss(θ) = sum(abs2, (data_train .- predict(θ)).*weights) #WRONNNGGG
 
 
 #= function regularization(θ)
@@ -330,7 +334,7 @@ using ReverseDiff
 @time loss(θ)
 @time predict(θ)
 @time regularization(θ)
-@time grad_reverse = ReverseDiff.gradient(loss, θ)
+@time grad_reverse = Zygote.gradient(loss, θ)
 @time grad_regularization = Zygote.gradient(regularization, θ)[1]
 
 
@@ -348,12 +352,12 @@ callback = function(p,l)
     println(l)
     println(iter)
     iter += 1
-    l < 2.0e-1
+    l < 2.0e-3
 end
 
 opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.985, 20))
 
-@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 170)
+@time results = Optimization.solve(optprob, opt, callback = callback, maxiters = 180)
 
 optf2 = Optimization.OptimizationFunction((x, p) -> loss(x), adtype)
 optprob2 = Optimization.OptimizationProblem(optf2, results.u)
@@ -374,7 +378,7 @@ plot!(0:0.5:6.0, 0:0.5:6.0, label = nothing)
 
 plot(c_exp_data[2:end, 1], c_exp_data[2:end, 2] .- aaa*cin, marker = 'o')
 
-writedlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7.csv", results_2.u)
+writedlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7_abs2.csv", results_2.u)
 
 # ------ Plotting Residuals 
 using KernelDensity, Distributions

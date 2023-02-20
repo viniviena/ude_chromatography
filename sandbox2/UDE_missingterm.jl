@@ -9,7 +9,7 @@ using DiffEqFlux
 #using DifferentialEquations
 #using Flux
 using Lux
-using Plots
+using PGFPlots
 #using MAT
 using DelimitedFiles
 using SciMLSensitivity
@@ -33,9 +33,14 @@ nn = Lux.Chain(
   Lux.Dense(8, 1)
 )
 
+nn = Lux.Chain(
+  Lux.Dense(2, 17, tanh_fast),
+  Lux.Dense(17, 1)
+)
+
 p_init, st = Lux.setup(rng, nn)
 
-best_p = Float32.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7.csv"))
+best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7_abs2.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
 neurons = 17
 best_w.layer_1.weight .= reshape(best_p[1:neurons*2], neurons, 2)
@@ -254,23 +259,25 @@ saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_dat
 
 #Solving UDE Problem
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), 
-saveat = saveats, abstol = 1e-6, reltol = 1e-6); #0.27 seconds after compiling
+abstol = 5e-7, reltol = 5e-7, saveat = saveats); #0.27 seconds after compiling
+
+#sum(abs, Array(solution_optim)[Int(n_variables/2), 1:end]/cin .- c_exp_data[:, 2]/cin)
 
 #Veryfing UDE fitting quality
-scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
-plot!(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
+plot(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
+plot(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end])
 #savefig(fig, "UDE_fitting_example.png")
 
 #Creating missing term function~
 q_eq_vec = []
 q_vec = []
 U_vec = []
-lower = 30 
+lower = 30
 upper = size(solution_optim.t, 1) - 100
-for i in 10:1:10
+for i in 0:10:20 #change qeq
     println(i)
     c_ = solution_optim[Int(n_variables/2) - i, lower:upper]
-    qeq_ = qmax*k_iso.*c_.^1.00./(1 .+ k_iso.*c_.^1.00)./q_test
+    qeq_ = qmax*k_iso.*abs.(c_).^1.00./(1 .+ k_iso.*abs.(c_).^1.00)./q_test
     push!(q_eq_vec, qeq_)
     q_ = Array(solution_optim)[Int(n_variables) - i, lower:upper]./q_test
     push!(q_vec, q_)
@@ -283,17 +290,10 @@ U_vec = transpose(mapreduce(permutedims, vcat, U_vec))
 q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
 q_vec = mapreduce(permutedims, hcat, q_vec)
 
-y_linear = log.(1.00008 .- (q_vec./q_eq_vec).^2)
+plot(solution_optim.t[lower:upper], U_vec[:])
+plot(saveats[lower:upper], q_vec[:])
+y_linear = log.(1.00011 .- (q_vec./q_eq_vec).^2)
 plot(saveats[lower:upper], - y_linear[:])
-
-# Finding missing term with sparse regression
-#Expected missing term is: 0.11*z[1]^2*z[2]^-1 - 0.11*z[2] 
-
-#Simplest expression I've got was φ₁ = p₂ + p₁*(z[2]^-1) + p₄*(z[1]^2)*(z[2]^-1) + p₃*(z[2]^-1)*z[1]
-#= p₁ => -2.61895
-p₂ => -7.22365
-p₃ => 3.36801
-p₄ => 0.07539 =# #STLSQ
 
 
 using DataDrivenSparse
@@ -304,21 +304,22 @@ using SymbolicRegression
 using UnPack
 using StableRNGs
 
-@variables z[1:2]
-z = collect(z)
+@variables q_ast, q
+#z = collect(z)
 
 polys = []
-for i ∈ -1:3, j ∈ -1:3
-    if i == 0 && j == 0 
-        nothing
-    else
-    poli2 = z[1]^i * z[2]^j
+for i ∈ 0:6, j ∈ 0:6
+#    if i == 0 && j == 0 
+#        nothing
+#    else
+    poli2 = q_ast^i * q^j
     push!(polys, poli2)
-    end
+#    end
 end
 
 h__f = [unique(polys)...]
-basis = Basis(h__f, z)
+#b = polynomial_basis(z, 3)
+basis = Basis(h__f, [q_ast, q])
 
 #Defining datadriven problem
 
@@ -336,9 +337,9 @@ Plots.plot(problem_regression)
 
 #Sparse regression
 options = DataDrivenCommonOptions(
-    maxiters = 15_000, normalize = DataNormalization(),
-    selector = bic, digits = 5,
-    data_processing = DataProcessing(split = 1.0, batchsize = Int(round((size(X_expanded, 2)/1))), 
+    maxiters = 10_000, normalize = DataNormalization(ZScoreTransform),
+    selector = bic, digits = 6,
+    data_processing = DataProcessing(split = 0.95, batchsize = Int(round((size(X_expanded, 2)/10))), 
     shuffle = true, rng = StableRNG(1111)))
 
 bics = []
@@ -346,10 +347,10 @@ lambdas = []
 number_of_terms = []
 rss_vec = []
 
-for λ in exp10.(-2.0:0.05:0.0)
+for λ in exp10.(-3.0:0.1:1.0)
     println("lambda is $λ")
     println("\n")
-    opt = STLSQ(λ) # λ < exp10(-1.35) gives error
+    opt = ADMM(λ) # λ < exp10(-1.35) gives error
     res = solve(problem_regression, basis, opt, options = options)
     system = get_basis(res);
     pas = get_parameter_map(system);
@@ -364,22 +365,191 @@ for λ in exp10.(-2.0:0.05:0.0)
     push!(rss_vec, rss(res))
 end
 
-λ = exp10.(-3.0:0.05:0.0)
-#λ = 0.0398107
-opt = STLSQ(λ) # λ < exp10(-1.35) gives error
-res = solve(problem_regression, basis, opt, options = options)
+λ = exp10.(-3.0:0.05:0.5)
+opt2 = ADMM(λ) # λ < exp10(-1.35) gives error
+res = solve(problem_regression, basis, opt2, options = options)
 println(res)
 system = get_basis(res)
 println(system)
-get_parameter_map(system)
+maps = get_parameter_map(system)
+bic(res)
+
+
+nn_eqs = get_basis(res)
+
+
+function parameter_loss(p)
+    Y = map(Base.Fix2(nn_eqs, p), eachcol(X_expanded))
+    sum(abs2, Y_expanded[:] .- mapreduce(permutedims, vcat, Y))
+end
+
+a = parameter_loss(get_parameter_values(nn_eqs))
+using Optimization
+adtype = Optimization.AutoForwardDiff()
+optf = Optimization.OptimizationFunction((x, p) -> parameter_loss(x), adtype)
+optprob = Optimization.OptimizationProblem(optf, get_parameter_values(nn_eqs))
+parameter_res = Optimization.solve(optprob, BFGS(), maxiters = 5000)
+parameter_loss(parameter_res.u)
+parameter_res.u
 
 
 fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
 savefig(fig2, "sparse_reg_example.png")
 
-stats_reg = hcat(bics, lambdas, number_of_terms, rss_vec)
-writedlm("sparse_reg_data/stats_improved_quad_lang.csv", stats_reg ,',')
+stats_reg = Float64.(hcat(bics, lambdas, number_of_terms, rss_vec))
+writedlm("sparse_reg_data/stats_improved_kldf_sips_abs2.csv", stats_reg ,',')
 
-@which plot(res)
+using StatsBase
+#Plotting
+fig2 = GroupPlot(2, 1, groupStyle = "horizontal sep = 2.0cm, vertical sep = 2.0cm");
+push!(fig2, Axis([Plots.Linear(stats_reg[1:end, 2], stats_reg[1:end, 1], style = "blue")],
+        legendPos="south east", xmode = "log", xlabel = L"\lambda", ylabel = "Bayesian Information Criterion"))
 
-log10(0.07943282347242814)
+push!(fig2, Axis([Plots.Linear(stats_reg[1:end, 2], stats_reg[1:end, 3], style = "blue, mark = square*")],
+legendPos="south east", xmode = "log", xlabel = L"\lambda", ylabel = "Number of active terms"))
+save("sparse_reg_data/kldf_sipsss.pdf", fig2)
+
+
+Y = map(Base.Fix2(nn_eqs, parameter_res.u), eachcol(X_expanded))
+dqdt_reg = mapreduce(permutedims, vcat, Y)
+
+fig3 = GroupPlot(3, 1, groupStyle = "horizontal sep = 3.0cm, vertical sep = 2.0cm");
+push!(fig3, Axis([Plots.Linear(1:1:size(U_vec, 2) |> collect, q_eq_vec[:]*q_test, legendentry = L"q^*", mark = "none", style = "blue!60"),
+Plots.Linear(1:1:size(U_vec, 2) |> collect, q_vec[:]*q_test, legendentry = L"q", mark = "none", style = "red!60")],legendPos="south east", xlabel = "Sample ID", ylabel = "adsorbed amount (mg/L)"))
+push!(fig3, Axis([Plots.Linear(1:1:size(U_vec, 2) |> collect, Y_expanded[:], legendentry = L"\partial q / \partial t", mark = "none", style = "blue!60"),
+Plots.Linear(1:1:size(U_vec, 2) |> collect, dqdt_reg[:], legendentry = L"\partial \hat{q} / \partial t", mark = "none", style = "black!60, dashed")],legendPos="north east", xlabel = "Sample ID", ylabel = "uptake rate (mg/L)"))
+push!(fig3, Axis([Plots.Linear(1:1:size(U_vec, 2) |> collect, U_vec[:] - dqdt_reg[:], legendentry = L"error", mark = "none", style = "red!60, dashed")],legendPos="north east", xlabel = "Sample ID", ylabel = "error (mg/L)"))
+save("sparse_reg_data/improved_quad_lang_performance_6terms.pdf", fig3)
+
+
+
+plot(1:1:size(U_vec, 2) |> collect, dqdt_reg)
+plot!(1:1:size(U_vec, 2) |> collect, Y_expanded[:])
+
+
+
+mutable struct col_model_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
+    n_variables::T1
+    n_elements::T2
+    p_order::T3
+    L::T4
+    h::T5
+    u::T6
+    y_dy::T7
+    y_dy2::T8
+    Pe::T9
+    epsilon::T10
+    c_in::T11
+    dy_du::T12
+    dy2_du::T13
+end
+    
+#using TimerOutputs
+using UnPack
+    
+    
+dy_du = dy2_du = ones(Float64, n_variables)
+    
+    
+function (f::col_model_test)(yp, y, p, t)
+   #Aliasing parameters
+
+   @unpack n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
+   Pe, epsilon, c_in, dy_du, dy2_du  = f 
+   
+   
+   dy_du =  y_dy*y
+   dy2_du = y_dy2*y
+
+   
+   j = 0
+   #---------------------Mass Transfer and equilibrium -----------------
+
+   c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
+   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
+   #q_eq = 25.0*abs.(c).^0.6/q_test
+   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
+
+   q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
+   x1x2 =  [q_eq q]'
+
+   û = mapreduce(permutedims, vcat, map(Base.Fix2(nn_eqs, p), eachcol(x1x2)))
+   #-------------------------------mass balance -----------------
+
+   begin
+       #Internal node equations
+       cl_idx = 2 + j
+       cu_idx = p_order + 2 * n_elements - 3 + j
+
+       ql_idx = 1 * (p_order + 2 * n_elements - 2) + 2 + j
+       qu_idx = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j
+
+       ql_idx2 = 1 * (p_order + 2 * n_elements - 2) + 2 + j - 1
+       qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
+
+       cbl_idx = j + 1
+       cbu_idx = j + p_order + 2 * n_elements - 2
+
+       #Liquid phase residual
+        
+       yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view û[2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
+
+       #(@view nn(x1x2, p, st)[1][2:end - 1])
+       #Solid phase residual
+
+       yp[ql_idx2:qu_idx2] .= û
+
+       #(@view nn(x1x2, p, st)[1][1:end])
+
+       #ex_[i](t)
+       #Boundary node equations
+       yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in(t))
+
+       yp[cbu_idx] =  dy_du[cbu_idx] / h / L
+   end
+   nothing
+end
+
+using DataInterpolations
+
+t_interp_lang = [0.0:0.1:110.0; 110.0000001; 120.00:5.:250.0; 250.0000001; 260.0:5.0:500.]
+c_interp_lang = [fill(5.5, size(0.0:0.1:110., 1)); 3.58; fill(3.58, size(120.00:5.:250., 1)); 7.33;
+ fill(7.33, size(260.0:5.0:500., 1))]
+
+t_interp_sips = [0.0:0.1:110.0; 110.0000001; 120.00:5.:250.0; 250.0000001; 260.0:5.0:500.]
+c_interp_sips = [fill(5.5, size(0.0:0.1:110., 1)); 0.75; fill(0.75, size(120.00:5.:250., 1)); 9.33;
+ fill(9.33, size(260.0:5.0:500., 1))]
+
+#scatter(t_interp_lang, c_interp_lang)
+c_in_t = LinearInterpolation(c_interp_lang, t_interp_lang)
+
+rhs_test = col_model_test(n_variables, n_elements, p_order, L, h, u, y_dy, y_dy2, 
+Pe, epsilon, c_in_t, dy_du, dy2_du);
+f_node_test = ODEFunction(rhs_test, mass_matrix = MM)
+y0 = y_initial(y0_cache, 1e-3)
+tspan_test = (0.00e0, 400.00e0)
+
+prob_node_test = ODEProblem(f_node_test, y0, tspan_test, parameter_res.u) 
+solution_test = solve(prob_node_test, FBDF(autodiff = false), 
+abstol = 1e-6, reltol = 1e-6, tstops = [0.0, 110., 250.], saveat = 2.0e0);
+
+
+test_data = readdlm("test_data/testdata_improved_quad_lang_2min.csv", ',')
+test_rate = c_exp_data[2, 1] - c_exp_data[1, 1]
+
+using PGFPlots
+
+history = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
+push!(history, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution_test[Int(n_variables/2), 1:size(c_exp_data, 1)], mark = "none", style = "blue", legendentry = "Polynomial prediction - Train"),
+            Plots.Linear(c_exp_data[1:end, 1], c_exp_data[1:end, 2], onlyMarks=true, style = "blue, mark = *, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "Observations - Train"),  
+            Plots.Linear(110.0 + test_rate:test_rate:400 |> collect, solution_test[Int(n_variables/2), size(c_exp_data, 1) + 1:end], mark = "none", style = "red!60, dashed", legendentry = "Polynomial prediction - Test"),
+            Plots.Linear(test_data[size(c_exp_data, 1) + 1:end, 1], test_data[size(c_exp_data, 1) + 1:end, 2],onlyMarks=true, style = "red!60, mark = square*, mark options={scale=0.9, fill=white, fill opacity = 0.1}", legendentry = "Observations - Test"),
+            Plots.Linear([110., 110.], [0., 10.5], mark = "none", style = "black"),
+            Plots.Node("Train data", 30, 7, style = "blue"),
+            Plots.Node("Test data", 210, 7, style = "red!60")
+],
+        legendPos="south east", style = "grid = both, ytick = {0, 2, 4, 6, 8, 10}, xtick = {0, 40, 80,...,400}, legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = 0, ymax = 10, width = "14cm", height = "6cm", xlabel = "time [min]",
+       ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Langmuir isotherm - improved LDF - Sparse regression"))
+
+
+save("sparse_reg_data/improved_quad_lang_history_sparsereg.pdf", history)

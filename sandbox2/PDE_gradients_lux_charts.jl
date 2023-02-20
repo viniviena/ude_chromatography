@@ -396,7 +396,7 @@ plot!([error_mean], seriestype="vline")
 
 #----model loading
 using DelimitedFiles
-best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7.csv"))
+best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7_abs2.csv"))
 best_w = deepcopy((Lux.ComponentArray(p_init)))
 #best_w = deepcopy(results_2.u)
 #= neurons = 20
@@ -557,7 +557,7 @@ push!(history, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution_test[
         legendPos="south east", style = "grid = both, ytick = {0, 2, 4, 6, 8, 10}, xtick = {0, 40, 80,...,400}, legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = 0, ymax = 10, width = "14cm", height = "6cm", xlabel = "time [min]",
        ylabel=L"\textrm{c}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/improved_quad_sips_history.pdf", history)       
+save("plots/improved_quad_sips_history_abs2.pdf", history)       
 
 
 history_error = GroupPlot(1, 1, groupStyle = "horizontal sep = 2.75cm, vertical sep = 2.0cm");
@@ -570,7 +570,7 @@ push!(history_error, Axis([Plots.Linear(0.0:test_rate:110.0 |> collect, solution
         legendPos="south east", style = "grid = both, ytick = {-0.4,-0.2, 0.0, 0.2, 0.4}, xtick = {0, 40, 80,...,400},  legend style={nodes={scale=0.5, transform shape}}", xmin = 0, xmax = 400, ymin = -0.4, ymax = 0.4, width = "14cm", height = "6cm", xlabel = "time [min]",
        ylabel=L"\textrm{\varepsilon}\,\left[\textrm{mg}\,\textrm{L}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
-save("plots/improved_quad_sips_history_error.pdf", history_error)
+save("plots/improved_quad_sips_history_error_abs2.pdf", history_error)
 
 
 
@@ -617,4 +617,4 @@ push!(uptake, Axis([Plots.Linear(solution_optim.t[1:end], learned_kinetics[1:end
        ylabel=L"\textrm{Uptake Rate}\,\left[\textrm{mgL}^{-1}\textrm{min}^{-1}\right]", title = "Sips isotherm - Vermeulen's"))
 
 
-save("plots/uptake_improved_quad_sips.pdf", uptake)
+save("plots/uptake_improved_quad_sips_abs2.pdf", uptake)
