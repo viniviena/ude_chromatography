@@ -111,7 +111,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -167,7 +167,7 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)
+   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
    #q_eq = 25.0*abs.(c).^0.6/q_test
    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
@@ -235,7 +235,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
 @time solution_other = solve(prob_node, FBDF(autodiff = false),
- abstol = 1e-6, reltol = 1e-6, saveat = 2.0); #0.27 seconds after compiling
+ abstol = 1e-6, reltol = 1e-6, saveat = 1.0); #0.27 seconds after compiling
 
 plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
 
@@ -251,15 +251,30 @@ writedlm("train_data/traindata_improved_quad_lang_2min.csv", dataset, ",")
 #uptake
 q_ = Array(solution_other)[Int(n_variables), :];
 c_ = Array(solution_other)[Int(n_variables/2), :];
-q_star = 1.8*55.54.*c_.^1.5./(1. .+ 1.8.*c_.^1.5);
+q_star = 1.8*55.54.*c_.^1.0./(1. .+ 1.8.*c_.^1.0);
 
 #dqdt = 0.22*(q_star + 0.2789*q_star.*exp.(-q_./2.0./q_star) - q_);
 #dqdt = 0.22*(q_star - q_);
 dqdt = 0.22(q_star.^2/2.0./q_ - q_./2.0)
-plot(solution_other.t, dqdt)
+plot!(dqdt, label = "true")
 t_dqdt = hcat(solution_other.t[1:end], dqdt)
 writedlm("test_data/true_dqdt_improved_quad_sips_2min.csv", t_dqdt, ',')
 
+
+
+#Taylor series expansion on original solution_optim
+using TaylorSeries
+
+q_ast, q = set_variables("q_ast q", order = 2)
+
+idx_to_value = 58
+
+t_x = 0.22/2*((q_ast + q_star[idx_to_value])^2/(q + q_[idx_to_value]) - (q + q_[idx_to_value]))
+
+t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
+dqdt[idx_to_value]
+approx_dqdt = t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
+plot(approx_dqdt, label = "taylor expanded")
 
 #test set
 

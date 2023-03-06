@@ -306,6 +306,7 @@ using StableRNGs
 
 @variables q_ast, q
 #z = collect(z)
+@variables z[1:2]
 
 polys = []
 for i ∈ 0:6, j ∈ 0:6
@@ -316,6 +317,8 @@ for i ∈ 0:6, j ∈ 0:6
     push!(polys, poli2)
 #    end
 end
+
+polynomial_basis(z, 2)
 
 h__f = [unique(polys)...]
 #b = polynomial_basis(z, 3)
@@ -335,36 +338,19 @@ Y_expanded = U_vec
 problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
+#Exporting data for testing Feynmann AI
+x_y = [X_expanded' Y_expanded']
+writedlm("sparse_reg_data/feyman_AI_data.txt", x_y,  " ")
+
 #Sparse regression
 options = DataDrivenCommonOptions(
-    maxiters = 10_000, normalize = DataNormalization(ZScoreTransform),
-    selector = bic, digits = 6,
+    maxiters = 500, normalize = DataNormalization(ZScoreTransform),
+    selector = bic, digits = 3,
     data_processing = DataProcessing(split = 0.95, batchsize = Int(round((size(X_expanded, 2)/10))), 
-    shuffle = true, rng = StableRNG(1111)))
+    shuffle = true, rng = StableRNG(1112)))
 
-bics = []
-lambdas = []
-number_of_terms = []
-rss_vec = []
 
-for λ in exp10.(-3.0:0.1:1.0)
-    println("lambda is $λ")
-    println("\n")
-    opt = ADMM(λ) # λ < exp10(-1.35) gives error
-    res = solve(problem_regression, basis, opt, options = options)
-    system = get_basis(res);
-    pas = get_parameter_map(system);
-    println(system)
-    println("\n")
-    println("bic is", bic(res))
-    println(res)
-
-    push!(bics, bic(res))
-    push!(lambdas, λ)
-    push!(number_of_terms, size(pas, 1))
-    push!(rss_vec, rss(res))
-end
-
+#Sparse regression
 λ = exp10.(-3.0:0.05:0.5)
 opt2 = ADMM(λ) # λ < exp10(-1.35) gives error
 res = solve(problem_regression, basis, opt2, options = options)
@@ -392,6 +378,45 @@ parameter_res = Optimization.solve(optprob, BFGS(), maxiters = 5000)
 parameter_loss(parameter_res.u)
 parameter_res.u
 
+#Taylor expanding original terms
+
+using TaylorSeries
+
+c_t = solution_optim[Int(n_variables/2), lower:upper]
+qeq_t = qmax*k_iso.*abs.(c_t).^1.00./(1 .+ k_iso.*abs.(c_t).^1.00)
+q_t = Array(solution_optim)[Int(n_variables), lower:upper]
+dqdt_t = nn([qeq_t/q_test q_t/q_test]', best_w, st)[1]
+plot(1:size(qeq_t, 1), dqdt_t[:])
+q_t[80]
+qeq_t[80]
+
+taylor_expand(x -> 1/x, 20, order = 2)
+
+x, y = set_variables("x y", order = 2)
+
+idx_to_value = 200
+t_x = 0.22/2*((x + qeq_t[idx_to_value])^2 - (y + q_t[idx_to_value])^2)/(y + q_t[idx_to_value])
+
+t_x_nn = nn([(x + qeq_t[idx_to_value]/q_test) (y + q_t[idx_to_value]/q_test)]', best_w, st)[1]
+
+approx_dqdt = t_x_nn[1].(qeq_t/q_test, q_t/q_test)
+plot(1:size(qeq_t, 1), approx_dqdt)
+
+#Symbolic regression
+
+eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
+                                              loss = L2DistLoss(),
+                                              verbosity = 1, progress = true, npop = 30,
+                                              timeout_in_seconds = 80.0)
+
+
+
+alg_SR = EQSearch(eq_options = eqsearch_options)
+
+res = solve(problem_regression, basis, alg_SR, options = options)
+println(res)
+system = get_basis(res)
+println(system)
 
 fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
 savefig(fig2, "sparse_reg_example.png")
