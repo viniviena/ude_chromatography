@@ -335,6 +335,8 @@ upper = size(solution_optim.t, 1) - 180 =#
 
 X_expanded = [q_eq_vec[1:1:end]'*q_test; q_vec[1:1:end]'*q_test]
 Y_expanded = U_vec
+#writedlm("Xs.csv", X_expanded', ",")
+#writedlm("Ys.csv", Y_expanded', ",")
 problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
