@@ -34,15 +34,15 @@ nn = Lux.Chain(
 )
 
 nn = Lux.Chain(
-  Lux.Dense(2, 17, tanh_fast),
-  Lux.Dense(17, 1)
+  Lux.Dense(2, 20, tanh_fast),
+  Lux.Dense(20, 1)
 )
 
 p_init, st = Lux.setup(rng, nn)
 
-best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_lang_tanh_2min_5e-7_abs2.csv"))
+best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7_abs2.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
-neurons = 17
+neurons = 20
 best_w.layer_1.weight .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
@@ -94,7 +94,7 @@ cin = 5.5
 k_transf = 0.22
 k_iso  = 1.8
 qmax = 55.54
-q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0)
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
 
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
@@ -148,7 +148,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
     #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
     #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
     #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
@@ -202,7 +202,7 @@ function (f::col_model_node1)(yp, y, p, t)
     #---------------------Mass Transfer and equilibrium -----------------
 
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-    q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)/q_test
+    q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
     #q_eq = 25.0*abs.(c).^0.6/q_test
     #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
@@ -247,7 +247,7 @@ end
     
  
 #Importing experimental data
-c_exp_data = readdlm("train_data/traindata_improved_quad_lang_2min.csv", ',', Float64)
+c_exp_data = readdlm("train_data/traindata_improved_quad_sips_2min.csv", ',', Float64)
 
 
 # Building UDE problem
@@ -266,6 +266,11 @@ abstol = 5e-7, reltol = 5e-7, saveat = saveats); #0.27 seconds after compiling
 #Veryfing UDE fitting quality
 plot(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
 plot(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end])
+
+fig_test = GroupPlot(3, 1, groupStyle = "horizontal sep = 3.0cm, vertical sep = 2.0cm");
+push!(fig_test, Axis([Plots.Linear(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], legendentry = L"q^*", mark = "none", style = "blue!60"),
+Plots.Linear(c_exp_data[1:end, 1], c_exp_data[1:end, 2], legendentry = L"q", mark = "*", style = "blue!60")],
+legendPos="south east", xlabel = "Sample ID", ylabel = "adsorbed amount (mg/L)"))
 #savefig(fig, "UDE_fitting_example.png")
 
 #Creating missing term function~
@@ -289,6 +294,8 @@ end
 U_vec = transpose(mapreduce(permutedims, vcat, U_vec))
 q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
 q_vec = mapreduce(permutedims, hcat, q_vec)
+
+
 
 plot(solution_optim.t[lower:upper], U_vec[:])
 plot(saveats[lower:upper], q_vec[:])
@@ -380,11 +387,11 @@ parameter_res = Optimization.solve(optprob, BFGS(), maxiters = 5000)
 parameter_loss(parameter_res.u)
 parameter_res.u
 
-#Taylor expanding original terms
+#------------Taylor expanding original terms----------
 
-using TaylorSeries
+#using TaylorSeries
 
-c_t = solution_optim[Int(n_variables/2), lower:upper]
+#= c_t = solution_optim[Int(n_variables/2), lower:upper]
 qeq_t = qmax*k_iso.*abs.(c_t).^1.00./(1 .+ k_iso.*abs.(c_t).^1.00)
 q_t = Array(solution_optim)[Int(n_variables), lower:upper]
 dqdt_t = nn([qeq_t/q_test q_t/q_test]', best_w, st)[1]
@@ -402,11 +409,12 @@ t_x = 0.22/2*((x + qeq_t[idx_to_value])^2 - (y + q_t[idx_to_value])^2)/(y + q_t[
 t_x_nn = nn([(x + qeq_t[idx_to_value]/q_test) (y + q_t[idx_to_value]/q_test)]', best_w, st)[1]
 
 approx_dqdt = t_x_nn[1].(qeq_t/q_test, q_t/q_test)
-plot(1:size(qeq_t, 1), approx_dqdt)
+plot(1:size(qeq_t, 1), approx_dqdt) =#
 
-#Symbolic regression
+#----------Symbolic regression------------
 
-eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
+#-----DataDrivenDiffEq-----------------
+#= eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
                                               loss = L2DistLoss(),
                                               verbosity = 1, progress = true, npop = 30,
                                               timeout_in_seconds = 80.0)
@@ -418,7 +426,36 @@ alg_SR = EQSearch(eq_options = eqsearch_options)
 res = solve(problem_regression, basis, alg_SR, options = options)
 println(res)
 system = get_basis(res)
-println(system)
+println(system) =#
+
+#-------SymbolicRegression---------
+options = SymbolicRegression.Options(
+    binary_operators = [+, *],
+    npopulations = 30
+)
+
+hall_of_fame = EquationSearch(
+    X_expanded, Y_expanded[:], niterations = 30, options=options,
+    parallelism=:multiprocessing
+)
+
+dominating = calculate_pareto_frontier(X_expanded, Y_expanded[:], hall_of_fame, options)
+express = node_to_symbolic(dominating[5].tree, options)
+trees = [member.tree for member in dominating]
+scores = [dominating[i].score for i in 1:size(dominating, 1)]
+expanded_express = SymbolicUtils.expand(express)
+dominating[5].score
+dominating[3].tree
+using Latexify
+latexify(expanded_express)
+
+for i in scores
+    println(i)
+end
+
+[0.1; 0.2]
+#----------------------------
+
 
 fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
 savefig(fig2, "sparse_reg_example.png")

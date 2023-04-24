@@ -1,3 +1,6 @@
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate()
 using HTTP, CSV, DataFrames
 X_url = "https://raw.githubusercontent.com/viniviena/repositoryname/master/Xs.csv"
 Y_url = "https://raw.githubusercontent.com/viniviena/repositoryname/master/Ys.csv"
@@ -27,6 +30,7 @@ end
 h__f = [unique(polys)...]
 basis = Basis(h__f, [q_ast, q])
 
+
 #Defining regression problem
 problem_regression = DirectDataDrivenProblem(X, Y)
 plot(problem_regression)
@@ -48,8 +52,8 @@ maps = get_parameter_map(system)
 bic(res)
 
 #Symbolic Regression
-eqsearch_options = SymbolicRegression.Options(binary_operators = [+],
-                                              loss = L2DistLoss(),
+#= eqsearch_options = SymbolicRegression.Options(binary_operators = [+],
+                                              loss = L1DistLoss(),
                                               verbosity = 1, progress = true, npop = 30,
                                               timeout_in_seconds = 80.0)
 
@@ -58,7 +62,7 @@ alg_SR = EQSearch(eq_options = eqsearch_options)
 options_SR = DataDrivenCommonOptions(
     maxiters = 100, normalize = DataNormalization(ZScoreTransform),
     selector = bic, digits = 3,
-    data_processing = DataProcessing(split = 0.995, batchsize = Int(round((size(X, 2)/10))), 
+    data_processing = DataProcessing(split = 0.99, batchsize = Int(round((size(X, 2)/10))), 
     shuffle = true, rng = StableRNG(1112)))
 
 
@@ -67,5 +71,31 @@ println(res_SR)
 system_SR = get_basis(res_SR)
 println(system_SR)
 maps = get_parameter_map(system_SR)
-bic(res_SR)
+bic(res_SR) =#
+
+#Test with SymbolicRegression.jl
+
+options = SymbolicRegression.Options(
+    binary_operators = [+, *],
+    npopulations = 30
+)
+
+hall_of_fame = EquationSearch(
+    X, Y[:], niterations = 50, options=options,
+    parallelism=:multiprocessing
+)
+
+dominating = calculate_pareto_frontier(X, Y[:], hall_of_fame, options)
+express = node_to_symbolic(dominating[end].tree, options)
+trees = [member.tree for member in dominating]
+SymbolicUtils.expand(express)
+dominating[end].score
+dominating[end].tree
+
+#= using SymbolicUtils
+using Conda
+using PyCall
+using SymPy
+import_from(sympy)
+u1, u2 = symbols("u1 u2") =#
 

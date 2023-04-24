@@ -4,22 +4,22 @@ Pkg.instantiate()
 
 #Importing ODE, plot and MAT libraries
 using OrdinaryDiffEq
-using DiffEqFlux
-using DiffEqCallbacks
+#using DiffEqFlux
+#using DiffEqCallbacks
 #using DifferentialEquations
-using Flux
-using Lux
+#using Flux
+#using Lux
 using Plots
 using MAT
 using DelimitedFiles
 using SciMLSensitivity
 import Random
-using PreallocationTools
+#using PreallocationTools
 using ForwardDiff, Zygote
 using ReverseDiff
-using Flux
+#using Flux
 using StatsBase
-
+pgfplotsx()
 # Script with auxiliary functions
 include("utils.jl")
 
@@ -60,7 +60,7 @@ qmax = 55.54
 
 c_iso = 0.0:0.05:10.0
 q_iso = @. qmax*k_iso*c_iso/(1 + k_iso*c_iso)
-plot(c_iso, q_iso)
+plot(c_iso, q_iso, label = "test", tex_output_standalone = true, xlabel = "c (mg/L)")
 
 
 #params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
@@ -192,7 +192,7 @@ function (f::col_model_node1)(yp, y, p, t)
 
        #Liquid phase residual
         
-       yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1].^2/2.0./q[2:end - 1] - q[2:end - 1]./2.0) .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
+       yp[cl_idx:cu_idx] .= -(1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] + 0.2789*q_eq[2:end - 1].*exp.(-q[2:end-1]./2.0./ q_eq[2:end-1]) - q[2:end-1]) .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
        #(@view nn(x1x2, p, st)[1][2:end - 1])
        #-(1 - epsilon) / epsilon  * k_transf * (q_eq[2:end - 1] - q[2:end - 1])
@@ -201,8 +201,8 @@ function (f::col_model_node1)(yp, y, p, t)
        #Solid phase residual
 
        #yp[ql_idx2:qu_idx2] .= k_transf * (q_eq - q)
-       #yp[ql_idx2:qu_idx2] .= k_transf * (q_eq + 0.2789*q_eq.*exp.(-q./2.0./q_eq) - q)
-       yp[ql_idx2:qu_idx2] .= k_transf * (q_eq.^2/2.0./q - q./2.0)
+       yp[ql_idx2:qu_idx2] .= k_transf * (q_eq + 0.2789*q_eq.*exp.(-q./2.0./q_eq) - q)
+       #yp[ql_idx2:qu_idx2] .= k_transf * (q_eq.^2/2.0./q - q./2.0)
 
        #(@view nn(x1x2, p, st)[1][1:end])
 
@@ -253,10 +253,9 @@ q_ = Array(solution_other)[Int(n_variables), :];
 c_ = Array(solution_other)[Int(n_variables/2), :];
 q_star = 1.8*55.54.*c_.^1.0./(1. .+ 1.8.*c_.^1.0);
 
-#dqdt = 0.22*(q_star + 0.2789*q_star.*exp.(-q_./2.0./q_star) - q_);
+dqdt = 0.22*(q_star + 0.2789*q_star.*exp.(-q_./2.0./q_star) - q_);
 #dqdt = 0.22*(q_star - q_);
-dqdt = 0.22(q_star.^2/2.0./q_ - q_./2.0)
-plot!(dqdt, label = "true")
+#dqdt = 0.22(q_star.^2/2.0./q_ - q_./2.0)
 t_dqdt = hcat(solution_other.t[1:end], dqdt)
 writedlm("test_data/true_dqdt_improved_quad_sips_2min.csv", t_dqdt, ',')
 
@@ -265,17 +264,23 @@ writedlm("test_data/true_dqdt_improved_quad_sips_2min.csv", t_dqdt, ',')
 #Taylor series expansion on original solution_optim
 using TaylorSeries
 
-q_ast, q = set_variables("q_ast q", order = 2)
+q_ast, q = set_variables("q_ast q", order = 1)
 
-idx_to_value = 58
+idx_to_value = 50
 
 t_x = 0.22/2*((q_ast + q_star[idx_to_value])^2/(q + q_[idx_to_value]) - (q + q_[idx_to_value]))
+
+t_x = 0.22*((q_ast + q_star[idx_to_value]) + 0.2789*(q_ast + q_star[idx_to_value]).*exp.(-(q + q_[idx_to_value])./2.0./(q_ast + q_star[idx_to_value])) - (q + q_[idx_to_value]))
 
 t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
 dqdt[idx_to_value]
 approx_dqdt = t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
-plot(approx_dqdt, label = "taylor expanded")
-
+fig = plot(approx_dqdt, label = "Taylor expansion", xlabel = "sample ID")
+plot!(fig, dqdt, label = "True uptake rate", ylabel = "Uptake rate (mg/L/min)", legend=:topright, seriestype=:scatter) 
+vline!(fig, [idx_to_value], color = "gray", label = "Taylor expansion point")
+savefig(fig, "taylor_improved_ldf.pdf")
+q_star[idx_to_value]
+q_[idx_to_value]
 #test set
 
 mutable struct col_model_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
