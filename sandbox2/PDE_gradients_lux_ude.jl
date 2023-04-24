@@ -28,7 +28,7 @@ include("utils.jl")
 
 n_elements = 42 # Number of finite elements
 collocation_points = 2 #Collocation points
-n_components = 1;  # 2 chemical species
+n_components = 1;  # Number of chemical species
 n_phases = 2 #2 phases → 1 liquid + 1 solid
 p_order = 4 #Polynomial order + 1
 n_variables = n_components * n_phases * (p_order + 2 * n_elements - 2)
