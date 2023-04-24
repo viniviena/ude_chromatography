@@ -63,16 +63,6 @@ q_iso = @. qmax*k_iso*c_iso/(1 + k_iso*c_iso)
 plot(c_iso, q_iso, label = "test", tex_output_standalone = true, xlabel = "c (mg/L)")
 
 
-#params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
-
-function round_zeros(x)
-    if abs(x) < 1e-42
-        0.0e0
-    else
-        Float64(x)
-end
-end
-
 #Calculating the derivative matrices stencil
 y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
 y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
@@ -112,9 +102,6 @@ function y_initial(y0_cache, c0)
 
     #Solid phase residual
     var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
-    #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
-    #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
-    #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
 
     j = j + p_order + 2 * n_elements - 2
     end
@@ -168,11 +155,7 @@ function (f::col_model_node1)(yp, y, p, t)
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
    q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
-   #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
-
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
-   #x1x2 =  [q_eq q]'
 
    #-------------------------------mass balance -----------------
 
@@ -206,7 +189,6 @@ function (f::col_model_node1)(yp, y, p, t)
        #yp[ql_idx2:qu_idx2] .= k_transf * (q_eq - q)
        yp[ql_idx2:qu_idx2] .= k_transf * (q_eq + 0.2789*q_eq.*exp.(-q./2.0./q_eq) - q)
        #yp[ql_idx2:qu_idx2] .= k_transf * (q_eq.^2/2.0./q - q./2.0)
-
 
 
        #Boundary node equations
@@ -262,6 +244,31 @@ dqdt = 0.22*(q_star + 0.2789*q_star.*exp.(-q_./2.0./q_star) - q_);
 #dqdt = 0.22(q_star.^2/2.0./q_ - q_./2.0)
 t_dqdt = hcat(solution_other.t[1:end], dqdt)
 writedlm("test_data/true_dqdt_improved_quad_sips_2min.csv", t_dqdt, ',')
+
+#Taylor series expansion on original solution_optim
+using TaylorSeries
+
+q_ast, q = set_variables("q_ast q", order = 2)
+q_ast, q = set_variables("q_ast q", order = 1)
+
+idx_to_value = 58
+idx_to_value = 50
+
+t_x = 0.22/2*((q_ast + q_star[idx_to_value])^2/(q + q_[idx_to_value]) - (q + q_[idx_to_value]))
+
+t_x = 0.22*((q_ast + q_star[idx_to_value]) + 0.2789*(q_ast + q_star[idx_to_value]).*exp.(-(q + q_[idx_to_value])./2.0./(q_ast + q_star[idx_to_value])) - (q + q_[idx_to_value]))
+
+t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
+dqdt[idx_to_value]
+approx_dqdt = t_x.(q_star .- q_star[idx_to_value], q_ .- q_[idx_to_value])
+plot(approx_dqdt, label = "taylor expanded")
+
+fig = plot(approx_dqdt, label = "Taylor expansion", xlabel = "sample ID")
+plot!(fig, dqdt, label = "True uptake rate", ylabel = "Uptake rate (mg/L/min)", legend=:topright, seriestype=:scatter) 
+vline!(fig, [idx_to_value], color = "gray", label = "Taylor expansion point")
+savefig(fig, "taylor_improved_ldf.pdf")
+q_star[idx_to_value]
+q_[idx_to_value]
 
 
 #------- Generating test set data
