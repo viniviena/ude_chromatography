@@ -411,22 +411,6 @@ t_x_nn = nn([(x + qeq_t[idx_to_value]/q_test) (y + q_t[idx_to_value]/q_test)]', 
 approx_dqdt = t_x_nn[1].(qeq_t/q_test, q_t/q_test)
 plot(1:size(qeq_t, 1), approx_dqdt) =#
 
-#----------Symbolic regression------------
-
-#-----DataDrivenDiffEq-----------------
-#= eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
-                                              loss = L2DistLoss(),
-                                              verbosity = 1, progress = true, npop = 30,
-                                              timeout_in_seconds = 80.0)
-
-
-
-alg_SR = EQSearch(eq_options = eqsearch_options)
-
-res = solve(problem_regression, basis, alg_SR, options = options)
-println(res)
-system = get_basis(res)
-println(system) =#
 
 #-------SymbolicRegression---------
 options = SymbolicRegression.Options(
