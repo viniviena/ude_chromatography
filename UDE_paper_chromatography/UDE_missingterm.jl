@@ -328,28 +328,13 @@ end
 polynomial_basis(z, 2)
 
 h__f = [unique(polys)...]
-#b = polynomial_basis(z, 3)
 basis = Basis(h__f, [q_ast, q])
-
-#Defining datadriven problem
-
-#Defining limits to make the problem more simetric (See in Figure)
-#= lower = 20 
-upper = size(solution_optim.t, 1) - 180 =#
-
-#X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
-#Y = reshape(U[lower:1:upper], 1, size(U[lower:1:upper])[1])
 
 X_expanded = [q_eq_vec[1:1:end]'*q_test; q_vec[1:1:end]'*q_test]
 Y_expanded = U_vec
-#writedlm("Xs.csv", X_expanded', ",")
-#writedlm("Ys.csv", Y_expanded', ",")
 problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
-#Exporting data for testing Feynmann AI
-x_y = [X_expanded' Y_expanded']
-writedlm("sparse_reg_data/feyman_AI_data.txt", x_y,  " ")
 
 #Sparse regression
 options = DataDrivenCommonOptions(
@@ -386,30 +371,6 @@ optprob = Optimization.OptimizationProblem(optf, get_parameter_values(nn_eqs))
 parameter_res = Optimization.solve(optprob, BFGS(), maxiters = 5000)
 parameter_loss(parameter_res.u)
 parameter_res.u
-
-#------------Taylor expanding original terms----------
-
-#using TaylorSeries
-
-#= c_t = solution_optim[Int(n_variables/2), lower:upper]
-qeq_t = qmax*k_iso.*abs.(c_t).^1.00./(1 .+ k_iso.*abs.(c_t).^1.00)
-q_t = Array(solution_optim)[Int(n_variables), lower:upper]
-dqdt_t = nn([qeq_t/q_test q_t/q_test]', best_w, st)[1]
-plot(1:size(qeq_t, 1), dqdt_t[:])
-q_t[80]
-qeq_t[80]
-
-taylor_expand(x -> 1/x, 20, order = 2)
-
-x, y = set_variables("x y", order = 2)
-
-idx_to_value = 200
-t_x = 0.22/2*((x + qeq_t[idx_to_value])^2 - (y + q_t[idx_to_value])^2)/(y + q_t[idx_to_value])
-
-t_x_nn = nn([(x + qeq_t[idx_to_value]/q_test) (y + q_t[idx_to_value]/q_test)]', best_w, st)[1]
-
-approx_dqdt = t_x_nn[1].(qeq_t/q_test, q_t/q_test)
-plot(1:size(qeq_t, 1), approx_dqdt) =#
 
 
 #-------SymbolicRegression---------
@@ -515,8 +476,6 @@ function (f::col_model_test)(yp, y, p, t)
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
    q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
-   #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
    x1x2 =  [q_eq q]'
