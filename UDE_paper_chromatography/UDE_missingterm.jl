@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-#Importing ODE, plot and MAT libraries
+#Importing ODE libraries
 using OrdinaryDiffEq
 using DiffEqFlux
 #using DiffEqCallbacks
@@ -31,24 +31,25 @@ nn = Lux.Chain(
   Lux.Dense(2, 10, tanh_fast),
   Lux.Dense(10, 8, tanh_fast),
   Lux.Dense(8, 1)
-)
+) #Use this one for 
 
 nn = Lux.Chain(
   Lux.Dense(2, 20, tanh_fast),
   Lux.Dense(20, 1)
-)
+) #Check number of neurons for 1-layer architecture
 
 p_init, st = Lux.setup(rng, nn)
 
 best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7_abs2.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
-neurons = 20
+neurons = 20 #Check and change number of neurons for 1-layer architecture
 best_w.layer_1.weight .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
 best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1)
 
 
+# Use to load weights of trained ANNs in 2-layer architectures 
 best_w.layer_1.weight  .= reshape(best_p[1:20], 10, 2)
 best_w.layer_1.bias .= reshape(best_p[21:21 + 9], 10, 1)
 best_w.layer_2.weight .= reshape(best_p[21 + 9 + 1: 21 + 9 + 1 + 10*8 - 1], 8, 10)
@@ -80,21 +81,20 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-
-Qf = 5.0e-2
-d = 0.5 
-L = 2.0 
-a = pi*d^2/4
-epsilon = 0.5
-u = Qf/(a*epsilon)
-Pe = 21.095632695978704
-Dax = u*L/Pe
+Qf = 5.0e-2 #Feed flow rate (L/min)
+d = 0.5 #Bed diameter (dm)
+L = 2.0  # Bed length (dm)
+a = pi*d^2/4 # Bed area (dm^2)
+epsilon = 0.5 # Void fraction
+u = Qf/(a*epsilon) # Interstitial velocity
+Pe = 21.095632695978704 #Peclet number
+Dax = u*L/Pe # Axial dispersion
 #ρ_b = 2.001e-3/(a*L)
-cin = 5.5
-k_transf = 0.22
-k_iso  = 1.8
-qmax = 55.54
-q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
+cin = 5.5 #Feed concentration 
+k_transf = 0.22 #Mass transfer coefficient
+k_iso  = 1.8 #Isotherm affinity parameter
+qmax = 55.54 #Isotherm saturation capacity
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5) #Isotherm saturation capacity
 
 
 #Calculating the derivative matrices stencil
@@ -103,9 +103,8 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 # ----- Building the actual PDE model--------
 
-
 y0_cache = ones(Float64, n_variables)
-c0 = 1e-3
+c0 = 1e-3 # Initial liquid phase concentration
 
 
 function y_initial(y0_cache, c0)
@@ -148,7 +147,7 @@ function y_initial(y0_cache, c0)
 end
 
 
-y0 =  y_initial(y0_cache, c0)
+y0 =  y_initial(y0_cache, c0) #Initialize initial condition vector (u0)
 
 
 mutable struct col_model_node1{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
@@ -252,9 +251,8 @@ fig_test = GroupPlot(3, 1, groupStyle = "horizontal sep = 3.0cm, vertical sep = 
 push!(fig_test, Axis([Plots.Linear(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], legendentry = L"q^*", mark = "none", style = "blue!60"),
 Plots.Linear(c_exp_data[1:end, 1], c_exp_data[1:end, 2], legendentry = L"q", mark = "*", style = "blue!60")],
 legendPos="south east", xlabel = "Sample ID", ylabel = "adsorbed amount (mg/L)"))
-#savefig(fig, "UDE_fitting_example.png")
 
-#Creating missing term function~
+#Creating X and Y vectors for sparse and symbolic regression
 q_eq_vec = []
 q_vec = []
 U_vec = []
@@ -263,7 +261,7 @@ upper = size(solution_optim.t, 1) - 100
 for i in 0:10:20 #change qeq
     println(i)
     c_ = solution_optim[Int(n_variables/2) - i, lower:upper]
-    qeq_ = qmax*k_iso.*abs.(c_).^1.00./(1 .+ k_iso.*abs.(c_).^1.00)./q_test
+    qeq_ = qmax*k_iso.*abs.(c_).^1.50./(1 .+ k_iso.*abs.(c_).^1.50)./q_test #Change according to isotherm
     push!(q_eq_vec, qeq_)
     q_ = Array(solution_optim)[Int(n_variables) - i, lower:upper]./q_test
     push!(q_vec, q_)
@@ -277,13 +275,7 @@ q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
 q_vec = mapreduce(permutedims, hcat, q_vec)
 
 
-
-plot(solution_optim.t[lower:upper], U_vec[:])
-plot(saveats[lower:upper], q_vec[:])
-y_linear = log.(1.00011 .- (q_vec./q_eq_vec).^2)
-plot(saveats[lower:upper], - y_linear[:])
-
-
+#Symbolic regression
 using DataDrivenSparse
 using ModelingToolkit
 using DataDrivenDiffEq
@@ -293,20 +285,12 @@ using UnPack
 using StableRNGs
 
 @variables q_ast, q
-#z = collect(z)
-@variables z[1:2]
 
 polys = []
 for i ∈ 0:6, j ∈ 0:6
-#    if i == 0 && j == 0 
-#        nothing
-#    else
     poli2 = q_ast^i * q^j
     push!(polys, poli2)
-#    end
 end
-
-polynomial_basis(z, 2)
 
 h__f = [unique(polys)...]
 basis = Basis(h__f, [q_ast, q])
