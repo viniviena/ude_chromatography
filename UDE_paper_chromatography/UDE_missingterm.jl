@@ -97,16 +97,6 @@ qmax = 55.54
 q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
 
 
-#params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
-
-function round_zeros(x)
-    if abs(x) < 1e-42
-        0.0e0
-    else
-        Float64(x)
-end
-end
-
 #Calculating the derivative matrices stencil
 y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
 y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
@@ -149,9 +139,6 @@ function y_initial(y0_cache, c0)
 
     #Solid phase residual
     var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
-    #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
-    #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
-    #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
 
     j = j + p_order + 2 * n_elements - 2
     end
@@ -203,8 +190,6 @@ function (f::col_model_node1)(yp, y, p, t)
 
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
     q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
-    #q_eq = 25.0*abs.(c).^0.6/q_test
-    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
     q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
     x1x2 =  [q_eq q]'
@@ -229,14 +214,11 @@ function (f::col_model_node1)(yp, y, p, t)
         
         yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
-        #(@view nn(x1x2, p, st)[1][2:end - 1])
         #Solid phase residual
 
         yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
-        #(@view nn(x1x2, p, st)[1][1:end])
 
-        #ex_[i](t)
         #Boundary node equations
         yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in)
 
@@ -261,7 +243,6 @@ saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_dat
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), 
 abstol = 5e-7, reltol = 5e-7, saveat = saveats); #0.27 seconds after compiling
 
-#sum(abs, Array(solution_optim)[Int(n_variables/2), 1:end]/cin .- c_exp_data[:, 2]/cin)
 
 #Veryfing UDE fitting quality
 plot(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
@@ -345,7 +326,7 @@ options = DataDrivenCommonOptions(
 
 
 #Sparse regression
-λ = exp10.(-3.0:0.05:0.5)
+λ = exp10.(-3.0:0.05:0.0)
 opt2 = ADMM(λ) # λ < exp10(-1.35) gives error
 res = solve(problem_regression, basis, opt2, options = options)
 println(res)
