@@ -53,23 +53,12 @@ epsilon = 0.5
 u = Qf/(a*epsilon)
 Pe = 21.095632695978704
 Dax = u*L/Pe
-#ρ_b = 2.001e-3/(a*L)
 cin = 5.5
 k_transf = 0.22
 k_iso  = 1.8
 qmax = 55.54
 q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0)
 
-
-#params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
-
-function round_zeros(x)
-    if abs(x) < 1e-42
-        0.0e0
-    else
-        Float64(x)
-end
-end
 
 #Calculating the derivative matrices stencil
 y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
@@ -90,7 +79,6 @@ import Random
 rng = Random.default_rng()
 Random.seed!(rng, 2)
 
-
 rbf(x) = exp.(-(x.^2))
 
 nn = Lux.Chain(
@@ -107,27 +95,12 @@ nn = Lux.Chain(
 p_init, st = Lux.setup(rng, nn)
 
 
-#--------------Flux
-#= ann_node1 = FastChain(FastDense(2, 15, tanh), FastDense(15, 1)); #ANNₑ,₁
-params1 = initial_params(ann_node1)
-
-
-function my_nn(u, p)
-    w1 = reshape((@view p[1:2*15]), 15, 2)
-    b1 = @view p[2*15+1:3*15]
-    w2 = reshape((@view p[3*15+1:3*15+1*15]), 1, 15)
-    b2 = @view p[4*15+1:end]
-
-    (w2 * (tanh.(w1 * u .+ b1*0.0) .+ b2*0.0))
-end =#
-
-# ----- Building the actual PDE model--------
-
-
 y0_cache = ones(Float64, n_variables)
-c0 = 1e-3
+c0 = 1e-3 #Avoid using 0.0 here 
 
 
+# Function to build initial condition vector 
+# Note that the values at boundaries are guesses as it is determined during initialization
 function y_initial(y0_cache, c0)
     var0 = y0_cache[:]
 
@@ -159,9 +132,6 @@ function y_initial(y0_cache, c0)
 
     #Solid phase residual
     var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.0/(1.0 + k_iso*c0^1.0)
-    #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
-    #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
-    #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
 
     j = j + p_order + 2 * n_elements - 2
     end
@@ -171,7 +141,7 @@ function y_initial(y0_cache, c0)
 end
 
 
-y0 =  y_initial(y0_cache, c0)
+y0 =  y_initial(y0_cache, c0) # Calling function to build initial condition vector
 
 
 # building rhs function for DAE solver
@@ -213,10 +183,8 @@ function (f::col_model_node1)(yp, y, p, t)
    j = 0
    #---------------------Mass Transfer and equilibrium -----------------
 
-   c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*c.^1.0./(1.0 .+ k_iso.*c.^1.0)/q_test
-   #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
+   c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) 
+   q_eq  = qmax*k_iso.*c.^1.0./(1.0 .+ k_iso.*c.^1.0)/q_test #Scaled solid equilibrium concentration
 
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
    x1x2 =  [q_eq q]'
@@ -241,14 +209,10 @@ function (f::col_model_node1)(yp, y, p, t)
         
        yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
-       #(@view nn(x1x2, p, st)[1][2:end - 1])
-       #Solid phase residual
 
+       #Solid phase residual
        yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
-       #(@view nn(x1x2, p, st)[1][1:end])
-
-       #ex_[i](t)
        #Boundary node equations
        yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in)
 
@@ -265,7 +229,7 @@ Pe, epsilon, cin, dy_du, dy2_du);
 
 f_node = ODEFunction(rhs, mass_matrix = MM)
 
-#----- non optimized prob
+#----- Solving ODE Problem with randomly initialized weights
 y0 = y_initial(y0_cache, c0)
 
 tspan = (first(c_exp_data[: , 1]), last(c_exp_data[: , 1])) 
@@ -289,11 +253,11 @@ tsave = c_exp_data[2:end, 1]
 
 function predict(θ)
     # --------------------------Sensealg---------------------------------------------
-    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
+    sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
 
     #----------------------------Problem solution-------------------------------------
     abstol = reltol = 5e-7
-    tspan = (0.0, maximum(c_exp_data[:, 1])) #TAVA ERRADOOO
+    tspan = (0.0, maximum(c_exp_data[:, 1])) 
 
     prob_ = remake(prob_node; p = θ, tspan = tspan)
     
@@ -301,30 +265,23 @@ function predict(θ)
     saveat = tsave, sensealg = sensealg))
 
     #----------------------------Output---------------------------------------------
-    # The outputs are composed by the predictions of cᵢ (all times) and qᵢ (at injection times)
 
     (@view s_new[Int(n_variables / 2), 1:end])./cin 
-    #Array(s_new[observed(simple_sys)[1].lhs][2:end])./cin
 end
 
 #Setting up training data
 data_train = c_exp_data[2:end, 2]/cin;
 
+#You can set up weights for the observations here
 cond1 = c_exp_data[2:end, 1] .> 50.
 cond2 = c_exp_data[2:end, 1] .< 63.
 is_bt = cond1 .& cond2
 weights = ones(size(data_train))
 weights[is_bt] .= 1.0
 
-# Setting up loss function for using with galactic
-loss(θ) = sum(abs2, (data_train .- predict(θ)).*weights) #WRONNNGGG
+#Loss function
+loss(θ) = sum(abs2, (data_train .- predict(θ)).*weights) #Using either abs or abs2 work well
 
-
-#= function regularization(θ)
-    #Flux.Losses.mse(_ann1(c0_scaled, θ[1 + 2: 29 + 2]), θ[1])*(1/0.5^2) +
-    #Flux.Losses.mse(_ann2(c0_scaled, θ[30 + 2: 30 + 28 + 2]), θ[2])*(1/0.5^2)
-    dot((@view θ[1:end]), (@view θ[1:end]))*(1/100)
-end =#
 
 # ..................testing gradients
 θ = copy(Lux.ComponentArray(p_init))
@@ -338,7 +295,7 @@ using ReverseDiff
 @time grad_regularization = Zygote.gradient(regularization, θ)[1]
 
 
-#------- MAP estimation
+#------- Maximum Likelihood estimation
 using Optimization
 
 #adtype = Optimization.AutoReverseDiff(true)
@@ -392,117 +349,6 @@ plot(collect(kde_samples.x), kde_samples.density)
 plot!(-0.2:0.001:0.2, samples_gauss)
 plot!([error_mean], seriestype="vline")
  
-
-
-#-------------- sparse regression
-
-#----model loading
-using DelimitedFiles
-best_p = Float32.(readdlm("trained_models/best_improved_quad_22neurons_40fe_sips_tanh_25min.csv"))
-best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
-best_w = deepcopy(results.u)
-neurons = 22
-best_w.layer_1.weight  .= reshape(best_p[1:neurons*2], neurons, 2)
-best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
-best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
-best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1)
-
-best_w.layer_1.weight  .= reshape(best_p[1:42], 21, 2)
-best_w.layer_1.bias .= reshape(best_p[43:43 + 20], 21, 1)
-best_w.layer_2.weight .= reshape(best_p[43 + 20 + 1: 43 + 20 + 1 + 20], 1, 21)
-best_w.layer_2.bias .= reshape(best_p[41 + 19 + 1 + 19 + 1:end], 1, 1)
-
-y0 = y_initial(y0_cache, 5e-3)
-prob_node22 = ODEProblem(f_node, y0, (0.0, maximum(c_exp_data[:, 1])), best_w)
-
-saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_data[:, 1])
-@time solution_optim = solve(prob_node22, FBDF(autodiff = false), saveat = saveats, abstol = 1e-7, reltol = 1e-7); #0.27 seconds after compiling
-scatter(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
-plot!(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], linewidth = 2.)
-
-loss(best_w)
-
-c_ = solution_optim[Int(n_variables/2) - 5, 1:end]
-qeq_ = qmax*k_iso.*c_.^1.50./(1 .+ k_iso.*c_.^1.50)./q_test
-q_ = Array(solution_optim)[Int(n_variables) - 5, 1:end]./q_test
-learned_kinetics = nn([qeq_ q_]', best_w, st)[1] # Missing term
-
-plot(solution_optim.t[1:end], learned_kinetics[:])
-
-#Reading true missing term dynamics
-true_dqdt = readdlm("true_dqdt_kldf_sips.csv", ',')
-
-scatter(true_dqdt[:, 1], true_dqdt[:, 2])
-plot(solution_optim.t[60:end], learned_kinetics[60:end], linewidth = 3.)
-
-using DataDrivenSparse
-using ModelingToolkit
-using DataDrivenDiffEq
-using DataDrivenSR
-using SymbolicRegression
-using UnPack
-using StableRNGs
-
-@variables z[1:2]
-z = collect(z)
-
-polys = []
-for i ∈ 0:2, j ∈ -1:1
-    poli2 = z[1]^i * z[2]^j
-    #poli2 = z[1]^i * z[2]^j * (ℯ^(dot(ones(size(w)), h_exp)))^k
-    push!(polys, poli2)
-end
-
-
-h__f = [unique(polys)...]
-basis = Basis(h__f, z)
-
-lower = 20
-upper = size(solution_optim.t, 1) - 150
-X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
-Y = reshape(learned_kinetics[lower:1:upper], 1, size(learned_kinetics[lower:1:upper])[1])
-problem_regression = DirectDataDrivenProblem(X, Y)
-plot(problem_regression)
-
-#Symbolic
-eqsearch_options = SymbolicRegression.Options(binary_operators = [+],
-                                              loss = L2DistLoss(),
-                                              verbosity = 1, progress = false, npop = 100,
-                                              timeout_in_seconds = 150.0)
-
-alg = EQSearch(eq_options = eqsearch_options)
-
-options = DataDrivenCommonOptions(
-    maxiters = 100, normalize = DataNormalization(),
-     selector = bic, digits = 5,
-    data_processing = DataProcessing(split = 1.0, batchsize = 352, 
-    shuffle = false, rng = StableRNG(1111)))
-
-res2 = solve(problem_regression, basis, alg, options = options)
-#plot(res2)
-println(res2)
-system_SR = get_basis(res2)
-println(system_SR)
-passs = get_parameter_map(system_SR)
-
-
-#Sparse
-options = DataDrivenCommonOptions(
-    maxiters = 10_000, normalize = DataNormalization(),
-     selector = bic, digits = 3,
-    data_processing = DataProcessing(split = 1.0, batchsize = 352, 
-    shuffle = true, rng = StableRNG(1111)))
-
-
-opt = STLSQ(exp10.(-1.5:0.05:5.0))
-res = solve(problem_regression, basis, opt, options = options)
-system = get_basis(res)
-pas = get_parameter_map(system)
-
-println(res)
-println(system)
-
-plot(plot(problem_regression), plot(res))
 
 #---------------- Test set performance
 mutable struct col_model_node_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
@@ -611,112 +457,3 @@ plot!(fig, 2.5:2.5:400, solution_test[Int(n_variables/2), 2:end], linewidth = 2.
 plot!(fig, 1.0:1.0:450, solution_test[Int(n_variables/2) - 50, :], linewidth = 2., label = "UDE learned")
 savefig("improved_kldf_test.pdf")
 
-
-
-
-
-
-
-
-
-
-
-#-----------------pSGLD(not using right now)
-using ProgressBars
-using Printf
-
-beta = 0.99;
-λ = 1e-5;
-V_θ = zeros(length(θ))
-a = 0.05; #0.0001; #try making this larger
-b = 0.05;
-γ = 0.10;
-
-#Visualizing Δt stepping
-t = 1:2000
-y = @. a*(b + t)^(-γ)
-plot(t,y)
-
-
-function train_loop(θ, V_θ, iters, log_likelihod, log_regularization, params_log)
-    t_count = 1
-    y0 = y_initial(θ, y0_cache, c0)
-    for t in iters
-
-        ∇Likelihood = Zygote.gradient(θ -> loss_initial(θ, y0), θ)[1]
-        ∇Prior = Zygote.gradient(regularization, θ)[1]
-
-        if t == 1
-            V_θ[:] = ∇Likelihood .* ∇Likelihood
-        else
-            V_θ *= beta
-            V_θ += (1 - beta) * (∇Likelihood .* ∇Likelihood)
-        end
-
-        m = λ .+ sqrt.(V_θ)
-        ϵ = a * (b + t_count)^-γ
-
-        noise = sqrt.(ϵ./m).*randn(length(θ))
-
-        θ = θ  - (0.5* ϵ * (∇Likelihood + ∇Prior) ./ m + noise)
-
-        y0 = y_initial(θ, y0_cache, c0)
-
-        
-        loss_value = loss(θ, y0)
-        reg = regularization(θ)
-        set_description(iters, string(@sprintf("Loss train %.4e regularization %.4e", loss_value, reg)))
-        push!(log_likelihod, loss_value)
-        push!(log_regularization, reg)
-        push!(params_log, θ)
-        
-
-        t_count += 1
-
-    end
-    θ
-end
-
-
-log_likelihod = []
-log_regularization = []
-params_log = []
-n_iters = 2000
-iters = ProgressBar(1:n_iters)
-
-train_loop(θ, V_θ, iters, log_likelihod, log_regularization, params_log)
-
-aaa = [params_log[i][4] for i in 1:size(params_log, 1)]
-plot(aaa[1970:2270])
-plot(log_likelihod[1876:1976])
-minimum(log_likelihod[1:end])
-argmin(log_likelihod[1:end])
-
-
-y0_best = y_initial(params_log[1976], y0_cache, c0)
-sol_best  = predict(params_log[1976], y0_best)
-
-plot(t_exp[1:204], sol_best[1], label = nothing)
-scatter!(t_exp[1:204], data_train[1], label = nothing)
-
-x1 = (q_exp_data[:, 1].- 6.00)/(13.00 - 6.00)
-x2 = (q_exp_data[:, 3] .- 0.047)/(4.00 - 0.047)
-ax1 = scatter(q_exp_data[:, 1], q_exp_data[:, 2], label = nothing)
-ax2 = scatter(q_exp_data[:, 3], q_exp_data[:, 4], label = nothing)
-
-q1_pred_best = _ann1([x1 x2]', params_log[1976][1: 29])
-q2_pred_best = _ann2([x1 x2]', params_log[1976][30: 30 + 28])
-
-for i in 0:100
-    global ax1, ax2
-    θ_sampled = params_log[1976 + i]
-    q1_pred = _ann1([x1 x2]', θ_sampled[1: 29])
-    q2_pred = _ann2([x1 x2]', θ_sampled[30: 30 + 28])
-    plot!(ax1, q_exp_data[:, 1], q1_pred[1, :], alpha=0.2, color="#BBBBBB", label = nothing)
-    plot!(ax2, q_exp_data[:, 3], q2_pred[1, :], label = nothing, alpha=0.2, color="#BBBBBB")
-end
-
-scatter(ax1, q_exp_data[:, 1], q_exp_data[:, 2], label = nothing)
-scatter(ax2, q_exp_data[:, 3], q_exp_data[:, 4], label = nothing)
-plot!(ax1, q_exp_data[:, 1], q1_pred_best[1, :], label = nothing)
-plot!(ax2, q_exp_data[:, 3], q2_pred_best[1, :], label = nothing)
