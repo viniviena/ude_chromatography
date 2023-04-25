@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-#Importing ODE, plot and MAT libraries
+#Importing ODE libraries
 using OrdinaryDiffEq
 using DiffEqFlux
 #using DiffEqCallbacks
@@ -31,24 +31,25 @@ nn = Lux.Chain(
   Lux.Dense(2, 10, tanh_fast),
   Lux.Dense(10, 8, tanh_fast),
   Lux.Dense(8, 1)
-)
+) #Use this one for 
 
 nn = Lux.Chain(
   Lux.Dense(2, 20, tanh_fast),
   Lux.Dense(20, 1)
-)
+) #Check number of neurons for 1-layer architecture
 
 p_init, st = Lux.setup(rng, nn)
 
 best_p = Float64.(readdlm("trained_models/best_improved_quad_10_8_neurons_42fe_sips_tanh_2min_5e-7_abs2.csv"))
 best_w = deepcopy(Float64.(Lux.ComponentArray(p_init)))
-neurons = 20
+neurons = 20 #Check and change number of neurons for 1-layer architecture
 best_w.layer_1.weight .= reshape(best_p[1:neurons*2], neurons, 2)
 best_w.layer_1.bias .= reshape(best_p[neurons*2 + 1:neurons*2 + neurons], neurons, 1)
 best_w.layer_2.weight .= reshape(best_p[neurons*2 + neurons + 1: neurons*2 + neurons + neurons], 1, neurons)
 best_w.layer_2.bias .= reshape(best_p[neurons*2 + neurons + neurons + 1:end], 1, 1)
 
 
+# Use to load weights of trained ANNs in 2-layer architectures 
 best_w.layer_1.weight  .= reshape(best_p[1:20], 10, 2)
 best_w.layer_1.bias .= reshape(best_p[21:21 + 9], 10, 1)
 best_w.layer_2.weight .= reshape(best_p[21 + 9 + 1: 21 + 9 + 1 + 10*8 - 1], 8, 10)
@@ -80,32 +81,21 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-
-Qf = 5.0e-2
-d = 0.5 
-L = 2.0 
-a = pi*d^2/4
-epsilon = 0.5
-u = Qf/(a*epsilon)
-Pe = 21.095632695978704
-Dax = u*L/Pe
+Qf = 5.0e-2 #Feed flow rate (L/min)
+d = 0.5 #Bed diameter (dm)
+L = 2.0  # Bed length (dm)
+a = pi*d^2/4 # Bed area (dm^2)
+epsilon = 0.5 # Void fraction
+u = Qf/(a*epsilon) # Interstitial velocity
+Pe = 21.095632695978704 #Peclet number
+Dax = u*L/Pe # Axial dispersion
 #ρ_b = 2.001e-3/(a*L)
-cin = 5.5
-k_transf = 0.22
-k_iso  = 1.8
-qmax = 55.54
-q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5)
+cin = 5.5 #Feed concentration 
+k_transf = 0.22 #Mass transfer coefficient
+k_iso  = 1.8 #Isotherm affinity parameter
+qmax = 55.54 #Isotherm saturation capacity
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5) #Isotherm saturation capacity
 
-
-#params_ode = [11.66, 9.13, 5.08, 5.11, kappaa, kappab, 163.0, 0.42, 11.64, 0.95]
-
-function round_zeros(x)
-    if abs(x) < 1e-42
-        0.0e0
-    else
-        Float64(x)
-end
-end
 
 #Calculating the derivative matrices stencil
 y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
@@ -113,9 +103,9 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 # ----- Building the actual PDE model--------
 
-
+#Initial condition vector
 y0_cache = ones(Float64, n_variables)
-c0 = 1e-3
+c0 = 1e-3 # Initial liquid phase concentration
 
 
 function y_initial(y0_cache, c0)
@@ -148,10 +138,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
-    #var0[ql_idx2:qu_idx2] .= 25.0*c0.^0.6
-    #var0[ql_idx2:qu_idx2] .= radial_surrogate.(c0)
-    #var0[ql_idx2:qu_idx2] .= interpolator.(c0)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5) #Changing according to isotherm case
 
     j = j + p_order + 2 * n_elements - 2
     end
@@ -161,7 +148,7 @@ function y_initial(y0_cache, c0)
 end
 
 
-y0 =  y_initial(y0_cache, c0)
+y0 =  y_initial(y0_cache, c0) #Initialize initial condition vector (u0)
 
 
 mutable struct col_model_node1{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
@@ -203,8 +190,6 @@ function (f::col_model_node1)(yp, y, p, t)
 
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
     q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)/q_test
-    #q_eq = 25.0*abs.(c).^0.6/q_test
-    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
     q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
     x1x2 =  [q_eq q]'
@@ -229,14 +214,11 @@ function (f::col_model_node1)(yp, y, p, t)
         
         yp[cl_idx:cu_idx] .= - (1 - epsilon) / epsilon * (@view nn(x1x2, p, st)[1][2:end - 1])  .- u*(@view dy_du[cl_idx:cu_idx]) / h / L  .+  Dax / (L^2) * (@view dy2_du[cl_idx:cu_idx]) / (h^2)
 
-        #(@view nn(x1x2, p, st)[1][2:end - 1])
         #Solid phase residual
 
         yp[ql_idx2:qu_idx2] .= (@view nn(x1x2, p, st)[1][1:end])
 
-        #(@view nn(x1x2, p, st)[1][1:end])
 
-        #ex_[i](t)
         #Boundary node equations
         yp[cbl_idx] = Dax / L * dy_du[cbl_idx] / h - u * (y[cbl_idx] -  c_in)
 
@@ -261,7 +243,6 @@ saveats = first(c_exp_data[:, 1]):mean(diff(c_exp_data[:, 1]))/10:last(c_exp_dat
 @time solution_optim = solve(prob_node22, FBDF(autodiff = false), 
 abstol = 5e-7, reltol = 5e-7, saveat = saveats); #0.27 seconds after compiling
 
-#sum(abs, Array(solution_optim)[Int(n_variables/2), 1:end]/cin .- c_exp_data[:, 2]/cin)
 
 #Veryfing UDE fitting quality
 plot(c_exp_data[1:end, 1], c_exp_data[1:end, 2])
@@ -271,9 +252,8 @@ fig_test = GroupPlot(3, 1, groupStyle = "horizontal sep = 3.0cm, vertical sep = 
 push!(fig_test, Axis([Plots.Linear(solution_optim.t[2:end], Array(solution_optim)[Int(n_variables/2), 2:end], legendentry = L"q^*", mark = "none", style = "blue!60"),
 Plots.Linear(c_exp_data[1:end, 1], c_exp_data[1:end, 2], legendentry = L"q", mark = "*", style = "blue!60")],
 legendPos="south east", xlabel = "Sample ID", ylabel = "adsorbed amount (mg/L)"))
-#savefig(fig, "UDE_fitting_example.png")
 
-#Creating missing term function~
+#Creating X and Y vectors for sparse and symbolic regression
 q_eq_vec = []
 q_vec = []
 U_vec = []
@@ -282,7 +262,7 @@ upper = size(solution_optim.t, 1) - 100
 for i in 0:10:20 #change qeq
     println(i)
     c_ = solution_optim[Int(n_variables/2) - i, lower:upper]
-    qeq_ = qmax*k_iso.*abs.(c_).^1.00./(1 .+ k_iso.*abs.(c_).^1.00)./q_test
+    qeq_ = qmax*k_iso.*abs.(c_).^1.50./(1 .+ k_iso.*abs.(c_).^1.50)./q_test #Change according to isotherm
     push!(q_eq_vec, qeq_)
     q_ = Array(solution_optim)[Int(n_variables) - i, lower:upper]./q_test
     push!(q_vec, q_)
@@ -296,13 +276,7 @@ q_eq_vec = mapreduce(permutedims, hcat, q_eq_vec)
 q_vec = mapreduce(permutedims, hcat, q_vec)
 
 
-
-plot(solution_optim.t[lower:upper], U_vec[:])
-plot(saveats[lower:upper], q_vec[:])
-y_linear = log.(1.00011 .- (q_vec./q_eq_vec).^2)
-plot(saveats[lower:upper], - y_linear[:])
-
-
+#Symbolic regression
 using DataDrivenSparse
 using ModelingToolkit
 using DataDrivenDiffEq
@@ -312,44 +286,21 @@ using UnPack
 using StableRNGs
 
 @variables q_ast, q
-#z = collect(z)
-@variables z[1:2]
 
 polys = []
 for i ∈ 0:6, j ∈ 0:6
-#    if i == 0 && j == 0 
-#        nothing
-#    else
     poli2 = q_ast^i * q^j
     push!(polys, poli2)
-#    end
 end
 
-polynomial_basis(z, 2)
-
 h__f = [unique(polys)...]
-#b = polynomial_basis(z, 3)
 basis = Basis(h__f, [q_ast, q])
-
-#Defining datadriven problem
-
-#Defining limits to make the problem more simetric (See in Figure)
-#= lower = 20 
-upper = size(solution_optim.t, 1) - 180 =#
-
-#X = [qeq_[lower:1:upper]'*q_test; q_[lower:1:upper]'*q_test]
-#Y = reshape(U[lower:1:upper], 1, size(U[lower:1:upper])[1])
 
 X_expanded = [q_eq_vec[1:1:end]'*q_test; q_vec[1:1:end]'*q_test]
 Y_expanded = U_vec
-#writedlm("Xs.csv", X_expanded', ",")
-#writedlm("Ys.csv", Y_expanded', ",")
 problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
-#Exporting data for testing Feynmann AI
-x_y = [X_expanded' Y_expanded']
-writedlm("sparse_reg_data/feyman_AI_data.txt", x_y,  " ")
 
 #Sparse regression
 options = DataDrivenCommonOptions(
@@ -360,7 +311,7 @@ options = DataDrivenCommonOptions(
 
 
 #Sparse regression
-λ = exp10.(-3.0:0.05:0.5)
+λ = exp10.(-3.0:0.05:0.0)
 opt2 = ADMM(λ) # λ < exp10(-1.35) gives error
 res = solve(problem_regression, basis, opt2, options = options)
 println(res)
@@ -387,46 +338,6 @@ parameter_res = Optimization.solve(optprob, BFGS(), maxiters = 5000)
 parameter_loss(parameter_res.u)
 parameter_res.u
 
-#------------Taylor expanding original terms----------
-
-#using TaylorSeries
-
-#= c_t = solution_optim[Int(n_variables/2), lower:upper]
-qeq_t = qmax*k_iso.*abs.(c_t).^1.00./(1 .+ k_iso.*abs.(c_t).^1.00)
-q_t = Array(solution_optim)[Int(n_variables), lower:upper]
-dqdt_t = nn([qeq_t/q_test q_t/q_test]', best_w, st)[1]
-plot(1:size(qeq_t, 1), dqdt_t[:])
-q_t[80]
-qeq_t[80]
-
-taylor_expand(x -> 1/x, 20, order = 2)
-
-x, y = set_variables("x y", order = 2)
-
-idx_to_value = 200
-t_x = 0.22/2*((x + qeq_t[idx_to_value])^2 - (y + q_t[idx_to_value])^2)/(y + q_t[idx_to_value])
-
-t_x_nn = nn([(x + qeq_t[idx_to_value]/q_test) (y + q_t[idx_to_value]/q_test)]', best_w, st)[1]
-
-approx_dqdt = t_x_nn[1].(qeq_t/q_test, q_t/q_test)
-plot(1:size(qeq_t, 1), approx_dqdt) =#
-
-#----------Symbolic regression------------
-
-#-----DataDrivenDiffEq-----------------
-#= eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
-                                              loss = L2DistLoss(),
-                                              verbosity = 1, progress = true, npop = 30,
-                                              timeout_in_seconds = 80.0)
-
-
-
-alg_SR = EQSearch(eq_options = eqsearch_options)
-
-res = solve(problem_regression, basis, alg_SR, options = options)
-println(res)
-system = get_basis(res)
-println(system) =#
 
 #-------SymbolicRegression---------
 options = SymbolicRegression.Options(
@@ -531,8 +442,6 @@ function (f::col_model_test)(yp, y, p, t)
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
    q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
-   #q_eq = 25.0*abs.(c).^0.6/q_test
-   #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
 
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
    x1x2 =  [q_eq q]'
