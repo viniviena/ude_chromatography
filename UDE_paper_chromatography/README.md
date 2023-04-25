@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository holds the code in Julia Language for the manuscript entitled as above and avaiable at https://arxiv.org/abs/2303.13555 (pre-print).
+This repository holds the code in Julia Language for the manuscript entitled as above and published at https://arxiv.org/abs/2303.13555 (pre-print).
 
 ## Usage
 
