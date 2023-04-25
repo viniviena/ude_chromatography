@@ -103,6 +103,7 @@ y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 # ----- Building the actual PDE model--------
 
+#Initial condition vector
 y0_cache = ones(Float64, n_variables)
 c0 = 1e-3 # Initial liquid phase concentration
 
@@ -137,7 +138,7 @@ function y_initial(y0_cache, c0)
     qu_idx2 = p_order + 2 * n_elements - 3 + 1 * (p_order + 2 * n_elements - 2) + j + 1
 
     #Solid phase residual
-    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5)
+    var0[ql_idx2:qu_idx2] .= qmax*k_iso*c0^1.5/(1.0 + k_iso*c0^1.5) #Changing according to isotherm case
 
     j = j + p_order + 2 * n_elements - 2
     end

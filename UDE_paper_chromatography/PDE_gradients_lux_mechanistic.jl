@@ -44,20 +44,21 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 
 #-------- Defining PDE parameters------------
 
-Qf = 5.0e-2
-d = 0.5 
-L = 2.0 
-a = pi*d^2/4
-epsilon = 0.5
-u = Qf/(a*epsilon)
-Pe = 21.095632695978704
-Dax = u*L/Pe
-#ρ_b = 2.001e-3/(a*L)
-cin = 5.5
-k_transf = 0.22
-k_iso  = 1.8
-qmax = 55.54
+Qf = 5.0e-2 #Flow rate (dm^3/min)
+d = 0.5  # Column Diameter (dm)
+L = 2.0 # Bed Length (dm)
+a = pi*d^2/4 # Column area (dm^2)
+epsilon = 0.5 #Bed porosity
+u = Qf/(a*epsilon) #Interstitial velocity (dm/min)
+Pe = 21.095632695978704 #Peclet Number
+Dax = u*L/Pe # Axial dispersion (dm^2/min)
+cin = 5.5 # Feed concentration (mg/L)
+k_transf = 0.22 #Mass transfer coefficient (1/min)
+k_iso  = 1.8 # Isotherm affinity parameter (L/mg)
+qmax = 55.54 # Isotherm saturation parameter (mg/L)
+q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0) #Scale parameter for amount adsorbed in solid phase
 
+#Plotting isotherm
 c_iso = 0.0:0.05:10.0
 q_iso = @. qmax*k_iso*c_iso/(1 + k_iso*c_iso)
 plot(c_iso, q_iso, label = "test", tex_output_standalone = true, xlabel = "c (mg/L)")
@@ -68,9 +69,11 @@ y_dy = Array(A * H^-1) # y = H*a and dy_dx = A*a = (A*H-1)*y
 y_dy2 = Array(B * H^-1) # y = H*a and d2y_dx2 = B*a = (B*H-1)*y
 
 
+#Initial condition vector
 y0_cache = ones(Float64, n_variables)
-c0 = 1e-3
+c0 = 1e-3 # Initial liquid phase concentration
 
+#Defining a function that creates the initial condition vector
 function y_initial(y0_cache, c0)
     var0 = y0_cache[:]
 
@@ -154,7 +157,7 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
+   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0) #Change exponent according to isotherm
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
 
    #-------------------------------mass balance -----------------
@@ -214,7 +217,7 @@ tspan = (0.0, 110.0)
 
 prob_node = ODEProblem(f_node, y0, tspan, 2.0)
 
-LinearAlgebra.BLAS.set_num_threads(1)
+LinearAlgebra.BLAS.set_num_threads(1) #Reduce runtime in Ryzen 6800H CPUs
 
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
@@ -305,9 +308,7 @@ function (f::col_model_test)(yp, y, p, t)
  
     c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
     q_eq  = qmax*k_iso.*abs.(c).^1.5./(1.0 .+ k_iso.*abs.(c).^1.5)
-    #q_eq = 25.0*abs.(c).^0.6/q_test
-    #q_eq = qmax*k_iso^(1/t)*p./(1.0 .+ k_iso*abs.(p).^t).^(1/t)*ρ_p  
- 
+
     q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
     #x1x2 =  [q_eq q]'
  
@@ -353,7 +354,7 @@ function (f::col_model_test)(yp, y, p, t)
  end
 
 
-# Feed concentration signal
+# Feed concentration signal (built with interpolation and tstops instead of callbacking)
 using DataInterpolations
 
 t_interp_lang = [0.0:0.1:110.0; 110.0000001; 120.00:5.:250.0; 250.0000001; 260.0:5.0:500.]
@@ -379,6 +380,7 @@ prob_node_test = ODEProblem(f_node_test, y0, tspan_test, Nothing)
 solution_test = solve(prob_node_test, FBDF(autodiff = false), 
 abstol = 1e-6, reltol = 1e-6, tstops = [0.0, 110., 250.], saveat = 2.0e0);
 
+#Adding Gaussian noise to simulated data
 using Distributions
 
 samples_test = [rand(Truncated(Normal(i, 0.05), 0.0, 15)) for i in Array(solution_test)[Int(n_variables/2), :]];

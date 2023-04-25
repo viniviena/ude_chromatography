@@ -45,19 +45,19 @@ MM = BitMatrix(Array(make_MM_2(n_elements, n_phases, n_components))) #make mass 
 #-------- Defining PDE parameters------------
 
 
-Qf = 5.0e-2
-d = 0.5 
-L = 2.0 
-a = pi*d^2/4
-epsilon = 0.5
-u = Qf/(a*epsilon)
-Pe = 21.095632695978704
-Dax = u*L/Pe
-cin = 5.5
-k_transf = 0.22
-k_iso  = 1.8
-qmax = 55.54
-q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0)
+Qf = 5.0e-2 #Flow rate (dm^3/min)
+d = 0.5  # Column Diameter (dm)
+L = 2.0 # Bed Length (dm)
+a = pi*d^2/4 # Column area (dm^2)
+epsilon = 0.5 #Bed porosity
+u = Qf/(a*epsilon) #Interstitial velocity (dm/min)
+Pe = 21.095632695978704 #Peclet Number
+Dax = u*L/Pe # Axial dispersion (dm^2/min)
+cin = 5.5 # Feed concentration (mg/L)
+k_transf = 0.22 #Mass transfer coefficient (1/min)
+k_iso  = 1.8 # Isotherm affinity parameter (L/mg)
+qmax = 55.54 # Isotherm saturation parameter (mg/L)
+q_test = qmax*k_iso*cin^1.0/(1.0 + k_iso*cin^1.0) #Scale parameter for amount adsorbed in solid phase
 
 
 #Calculating the derivative matrices stencil
@@ -81,6 +81,7 @@ Random.seed!(rng, 2)
 
 rbf(x) = exp.(-(x.^2))
 
+#Choose the architecture here (1 layer maximum of 2 performs well)
 nn = Lux.Chain(
   Lux.Dense(2, 10, tanh_fast),
   Lux.Dense(10, 8, tanh_fast),
@@ -94,9 +95,9 @@ nn = Lux.Chain(
 
 p_init, st = Lux.setup(rng, nn)
 
-
+#Initial condition vector
 y0_cache = ones(Float64, n_variables)
-c0 = 1e-3 #Avoid using 0.0 here 
+c0 = 1e-3 ## Initial liquid phase concentratio - Avoid using 0.0 here 
 
 
 # Function to build initial condition vector 
@@ -184,7 +185,7 @@ function (f::col_model_node1)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) 
-   q_eq  = qmax*k_iso.*c.^1.0./(1.0 .+ k_iso.*c.^1.0)/q_test #Scaled solid equilibrium concentration
+   q_eq  = qmax*k_iso.*c.^1.0./(1.0 .+ k_iso.*c.^1.0)/q_test #Change exponent according to each isotherm
 
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1])/q_test #scaling dependent variables
    x1x2 =  [q_eq q]'
