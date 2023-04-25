@@ -242,7 +242,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 ccall((:openblas_get_num_threads64_,Base.libblas_name), Cint, ())
 
 @time solution_other = solve(prob_node, FBDF(autodiff = false),
- saveat = c_exp_data[2, 1] - c_exp_data[1, 1]); #0.27 seconds after compiling
+ saveat = c_exp_data[2, 1] - c_exp_data[1, 1]); #0.05 seconds after compiling
 
 plot(solution_other.t, Array(solution_other)[Int(n_variables/2), :])
 scatter!(c_exp_data[:, 1], c_exp_data[:, 2])
@@ -255,6 +255,7 @@ tsave = c_exp_data[2:end, 1]
 function predict(θ)
     # --------------------------Sensealg---------------------------------------------
     sensealg = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true))
+    #Interpolating adjoint works well too
 
     #----------------------------Problem solution-------------------------------------
     abstol = reltol = 5e-7
@@ -288,12 +289,9 @@ loss(θ) = sum(abs2, (data_train .- predict(θ)).*weights) #Using either abs or 
 θ = copy(Lux.ComponentArray(p_init))
 
 using ReverseDiff
-
 @time loss(θ)
 @time predict(θ)
-@time regularization(θ)
-@time grad_reverse = Zygote.gradient(loss, θ)
-@time grad_regularization = Zygote.gradient(regularization, θ)[1]
+@time grad_reverse = Zygote.gradient(loss, θ) #ReverseDiff or Zygote are ok
 
 
 #------- Maximum Likelihood estimation
@@ -310,7 +308,7 @@ callback = function(p,l)
     println(l)
     println(iter)
     iter += 1
-    l < 2.0e-3
+    l < 1.0e-3
 end
 
 opt = Flux.Optimiser(ADAM(0.05), ExpDecay(1.0, 0.985, 20))

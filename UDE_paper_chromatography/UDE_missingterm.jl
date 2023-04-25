@@ -31,7 +31,7 @@ nn = Lux.Chain(
   Lux.Dense(2, 10, tanh_fast),
   Lux.Dense(10, 8, tanh_fast),
   Lux.Dense(8, 1)
-) #Use this one for 
+) #Use this one for 2 layer architectures
 
 nn = Lux.Chain(
   Lux.Dense(2, 20, tanh_fast),
@@ -94,7 +94,7 @@ cin = 5.5 #Feed concentration
 k_transf = 0.22 #Mass transfer coefficient
 k_iso  = 1.8 #Isotherm affinity parameter
 qmax = 55.54 #Isotherm saturation capacity
-q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5) #Isotherm saturation capacity
+q_test = qmax*k_iso*cin^1.5/(1.0 + k_iso*cin^1.5) #scaling parameter for solid phase concentration
 
 
 #Calculating the derivative matrices stencil
