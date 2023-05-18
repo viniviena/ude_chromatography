@@ -302,7 +302,7 @@ problem_regression = DirectDataDrivenProblem(X_expanded, Y_expanded)
 Plots.plot(problem_regression)
 
 
-#Sparse regression
+#Sparse and Symbolic regression
 options = DataDrivenCommonOptions(
     maxiters = 500, normalize = DataNormalization(ZScoreTransform),
     selector = bic, digits = 3,
@@ -365,24 +365,13 @@ for i in scores
 end
 
 [0.1; 0.2]
-#----------------------------
 
 
-fig2 = Plots.plot(Plots.plot(problem_regression), Plots.plot(res))
-savefig(fig2, "sparse_reg_example.png")
+#-----------Plotting
 
-stats_reg = Float64.(hcat(bics, lambdas, number_of_terms, rss_vec))
-writedlm("sparse_reg_data/stats_improved_kldf_sips_abs2.csv", stats_reg ,',')
 
 using StatsBase
-#Plotting
-fig2 = GroupPlot(2, 1, groupStyle = "horizontal sep = 2.0cm, vertical sep = 2.0cm");
-push!(fig2, Axis([Plots.Linear(stats_reg[1:end, 2], stats_reg[1:end, 1], style = "blue")],
-        legendPos="south east", xmode = "log", xlabel = L"\lambda", ylabel = "Bayesian Information Criterion"))
 
-push!(fig2, Axis([Plots.Linear(stats_reg[1:end, 2], stats_reg[1:end, 3], style = "blue, mark = square*")],
-legendPos="south east", xmode = "log", xlabel = L"\lambda", ylabel = "Number of active terms"))
-save("sparse_reg_data/kldf_sipsss.pdf", fig2)
 
 
 Y = map(Base.Fix2(nn_eqs, parameter_res.u), eachcol(X_expanded))
@@ -402,6 +391,7 @@ plot(1:1:size(U_vec, 2) |> collect, dqdt_reg)
 plot!(1:1:size(U_vec, 2) |> collect, Y_expanded[:])
 
 
+#Simulating breakthrough using the fitted polynomials
 
 mutable struct col_model_test{T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13}
     n_variables::T1
@@ -441,7 +431,7 @@ function (f::col_model_test)(yp, y, p, t)
    #---------------------Mass Transfer and equilibrium -----------------
 
    c = (@view y[2 + 0 - 1:p_order + 2*n_elements - 3 + 0 + 1]) #Scaling dependent variables
-   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0)
+   q_eq  = qmax*k_iso.*abs.(c).^1.0./(1.0 .+ k_iso.*abs.(c).^1.0) #Adjust here if necessary
 
    q = (@view y[2 + (p_order + 2*n_elements - 2) - 1: p_order + 2*n_elements - 3 + (p_order + 2*n_elements - 2) + 1]) #scaling dependent variables
    x1x2 =  [q_eq q]'
